@@ -85,7 +85,8 @@ static int janus_process_error_string(janus_request *request, uint64_t session_i
 static struct janus_json_parameter incoming_request_parameters[] = {
 	{"transaction", JSON_STRING, JANUS_JSON_PARAM_REQUIRED},
 	{"janus", JSON_STRING, JANUS_JSON_PARAM_REQUIRED},
-	{"id", JSON_INTEGER, JANUS_JSON_PARAM_POSITIVE}
+	{"id", JSON_INTEGER, JANUS_JSON_PARAM_POSITIVE},
+	{"config", JSON_OBJECT, JANUS_JSON_PARAM_POSITIVE}
 };
 static struct janus_json_parameter attach_parameters[] = {
 	{"plugin", JSON_STRING, JANUS_JSON_PARAM_REQUIRED},
@@ -829,6 +830,34 @@ int janus_process_incoming_request(janus_request *request) {
 			ret = janus_process_error(request, session_id, transaction_text, JANUS_ERROR_INVALID_REQUEST_PATH, "Unhandled request '%s' at this path", message_text);
 			goto jsondone;
 		}
+
+		/* Reset TURN server */
+		json_t *config = json_object_get(root, "config");
+    	json_t *turn = NULL;
+    	if (config)
+		    turn = json_object_get(config, "turn_server");
+		if (turn) {
+			json_t *o_url  = json_object_get(turn, "url");
+			json_t *o_port = json_object_get(turn, "port");
+			json_t *o_type = json_object_get(turn, "type");
+			json_t *o_user = json_object_get(turn, "username");
+			json_t *o_pwd  = json_object_get(turn, "credential");
+			if (o_url && o_port && o_type && o_user && o_pwd) {
+				char * turn_server = json_string_value(o_url);
+				uint16_t turn_port = json_integer_value(o_port);
+				char * turn_type = json_string_value(o_type);
+				char * turn_user = json_string_value(o_user);
+				char * turn_pwd = json_string_value(o_pwd);
+
+				JANUS_LOG(LOG_FATAL, "turn_server=%s, turn_port=%d, turn_type=%s, turn_user=%s, turn_pwd=%s\n", 
+						turn_server, turn_port, turn_type, turn_user, turn_pwd);
+
+				if(janus_ice_set_turn_server(turn_server, turn_port, turn_type, turn_user, turn_pwd) < 0) {
+					JANUS_LOG(LOG_FATAL, "Invalid TURN address %s:%u\n", turn_server, turn_port);
+				}
+			}
+		}
+
 		/* Any secret/token to check? */
 		ret = janus_request_check_secret(request, session_id, transaction_text);
 		if(ret != 0) {
@@ -1180,6 +1209,11 @@ int janus_process_incoming_request(janus_request *request) {
 				JANUS_LOG(LOG_WARN, "[%"SCNu64"]   -- DataChannels have been negotiated, but support for them has not been compiled...\n", handle->handle_id);
 			}
 #endif
+
+      JANUS_LOG(LOG_WARN, "WEBRTC_READY=%d, offer=%d\n",
+                janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_READY),
+                offer);
+
 			/* Check if it's a new session, or an update... */
 			if(!janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_READY)
 					|| janus_flags_is_set(&handle->webrtc_flags, JANUS_ICE_HANDLE_WEBRTC_ALERT)) {
