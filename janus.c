@@ -75,6 +75,9 @@ GHashTable *counters = NULL;
 janus_mutex counters_mutex;
 #endif
 
+/* STUN Server */
+static char *conf_stun_server = NULL;
+static uint16_t conf_stun_port = 0;
 
 /* API secrets */
 static char *api_secret = NULL, *admin_api_secret = NULL;
@@ -855,6 +858,14 @@ int janus_process_incoming_request(janus_request *request) {
 				if(janus_ice_set_turn_server(turn_server, turn_port, turn_type, turn_user, turn_pwd) < 0) {
 					JANUS_LOG(LOG_FATAL, "Invalid TURN address %s:%u\n", turn_server, turn_port);
 				}
+			}
+		}
+
+		/* update info of STUN */
+		if (conf_stun_server) {
+			JANUS_LOG(LOG_FATAL, "Retry STUN Server\n");
+			if(janus_ice_set_stun_server(conf_stun_server, conf_stun_port) < 0) {
+				JANUS_LOG(LOG_FATAL, "Invalid STUN address %s:%u\n", conf_stun_server, conf_stun_port);
 			}
 		}
 
@@ -3780,8 +3791,12 @@ gint main(int argc, char *argv[])
 	janus_ice_init(ice_lite, ice_tcp, full_trickle, ipv6, rtp_min_port, rtp_max_port);
 	if(janus_ice_set_stun_server(stun_server, stun_port) < 0) {
 		JANUS_LOG(LOG_FATAL, "Invalid STUN address %s:%u\n", stun_server, stun_port);
+#if 0 /* in case that STUN can not be used in NAT */
 		exit(1);
+#endif
 	}
+	conf_stun_server = stun_server;
+	conf_stun_port = stun_port;
 	if(janus_ice_set_turn_server(turn_server, turn_port, turn_type, turn_user, turn_pwd) < 0) {
 		JANUS_LOG(LOG_FATAL, "Invalid TURN address %s:%u\n", turn_server, turn_port);
 		exit(1);
