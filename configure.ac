@@ -118,6 +118,8 @@ AC_ARG_ENABLE([all-plugins],
                      [enable_plugin_videoroom=no])
                AS_IF([test "x$enable_plugin_voicemail" != "xyes"],
                      [enable_plugin_voicemail=no])
+               AS_IF([test "x$enable_plugin_safievoice" != "xyes"],
+                     [enable_plugin_safievoice=no])
               ],
               [])
 
@@ -652,6 +654,13 @@ AC_ARG_ENABLE([plugin-voicemail],
                      [enable_plugin_voicemail=no])],
               [enable_plugin_voicemail=maybe])
 
+AC_ARG_ENABLE([plugin-safievoice],
+              [AS_HELP_STRING([--disable-plugin-safievoice],
+                              [Disable safievoice plugin])],
+              [AS_IF([test "x$enable_plugin_safievoice" != "xyes"],
+                     [enable_plugin_safievoice=no])],
+              [enable_plugin_safievoice=maybe])
+
 PKG_CHECK_MODULES([SOFIA],
                   [sofia-sip-ua],
                   [
@@ -759,6 +768,7 @@ AM_CONDITIONAL([ENABLE_PLUGIN_VIDEOCALL], [test "x$enable_plugin_videocall" = "x
 AM_CONDITIONAL([ENABLE_PLUGIN_VIDEOROOM], [test "x$enable_plugin_videoroom" = "xyes"])
 AM_CONDITIONAL([ENABLE_PLUGIN_VOICEMAIL], [test "x$enable_plugin_voicemail" = "xyes"])
 AM_CONDITIONAL([ENABLE_PLUGIN_TEXTROOM], [test "x$enable_plugin_textroom" = "xyes"])
+AM_CONDITIONAL([ENABLE_PLUGIN_SAFIEVOICE], [test "x$enable_plugin_safievoice" = "xyes"])
 
 
 ##
@@ -940,6 +950,9 @@ AM_COND_IF([ENABLE_PLUGIN_VIDEOROOM],
 AM_COND_IF([ENABLE_PLUGIN_VOICEMAIL],
 	[echo "    Voice Mail:            yes"],
 	[echo "    Voice Mail:            no"])
+AM_COND_IF([ENABLE_PLUGIN_SAFIEVOICE],
+	[echo "    Safie Voice:           yes"],
+	[echo "    Safie Voice:           no"])
 AM_COND_IF([ENABLE_PLUGIN_RECORDPLAY],
 	[echo "    Record&Play:           yes"],
 	[echo "    Record&Play:           no"])
