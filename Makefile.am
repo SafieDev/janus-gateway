@@ -456,7 +456,7 @@ if ENABLE_PLUGIN_SAFIEVOICE
 plugin_LTLIBRARIES += plugins/libjanus_safievoice.la
 plugins_libjanus_safievoice_la_SOURCES = plugins/janus_safievoice.c
 plugins_libjanus_safievoice_la_CFLAGS = $(plugins_cflags)
-plugins_libjanus_safievoice_la_LDFLAGS = $(plugins_ldflags) -lopus
+plugins_libjanus_safievoice_la_LDFLAGS = $(plugins_ldflags) -lopus -lasound
 plugins_libjanus_safievoice_la_LIBADD = $(plugins_libadd)
 conf_DATA += conf/janus.plugin.safievoice.jcfg.sample
 EXTRA_DIST += conf/janus.plugin.safievoice.jcfg.sample.in
