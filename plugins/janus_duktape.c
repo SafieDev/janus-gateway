@@ -101,7 +101,7 @@
  * and, more importantly, both \c timeCallback() and \c pokeScheduler() which,
  * together with JavaScript's \c resumeScheduler(), will be clearer in the next section.
  *
- * \section coroutines JavaScript/C coroutines scheduler
+ * \section jcoroutines JavaScript/C coroutines scheduler
  *
  * Duktape is a single threaded environment. While it has a concept similar
  * to threads called coroutines, these are not threads as known in C.
@@ -129,7 +129,7 @@
  * This simple mechanism is what the sample JavaScript scripts provided in this
  * repo use, for instance, to handle incoming messages asynchronously,
  * so you can refer to those to have an idea of how it can be used. The
- * next section will address \ref timers instead.
+ * next section will address \ref jtimers instead.
  *
  * \note You can implement asynchronous behaviour any way you want, and
  * you're not required to use this C scheduler. Anyway, you must implement
@@ -137,7 +137,7 @@
  * its presence and fails if it's not there. If you don't need it, just
  * create an empty function that does nothing and you'll be fine.
  *
- * \section timers JavaScript/C time-based scheduler
+ * \section jtimers JavaScript/C time-based scheduler
  *
  * Another helpful way to implement asynchronous behaviour is with the
  * help of the \c timeCallback() function. Specifically, this function
@@ -214,7 +214,7 @@ struct janus_plugin_result *janus_duktape_handle_message(janus_plugin_session *h
 void janus_duktape_setup_media(janus_plugin_session *handle);
 void janus_duktape_incoming_rtp(janus_plugin_session *handle, int video, char *buf, int len);
 void janus_duktape_incoming_rtcp(janus_plugin_session *handle, int video, char *buf, int len);
-void janus_duktape_incoming_data(janus_plugin_session *handle, char *buf, int len);
+void janus_duktape_incoming_data(janus_plugin_session *handle, char *label, char *buf, int len);
 void janus_duktape_slow_link(janus_plugin_session *handle, int uplink, int video);
 void janus_duktape_hangup_media(janus_plugin_session *handle);
 void janus_duktape_destroy_session(janus_plugin_session *handle, int *error);
@@ -1051,7 +1051,7 @@ static duk_ret_t janus_duktape_method_relaydata(duk_context *ctx) {
 	janus_refcount_increase(&session->ref);
 	janus_mutex_unlock(&duktape_sessions_mutex);
 	/* Send the RTP packet */
-	janus_core->relay_data(session->handle, (char *)payload, len);
+	janus_core->relay_data(session->handle, NULL, (char *)payload, len);
 	janus_refcount_decrease(&session->ref);
 	duk_push_int(ctx, 0);
 	return 1;
@@ -1222,19 +1222,26 @@ int janus_duktape_init(janus_callbacks *callback, const char *config_path) {
 
 	/* Read configuration */
 	char filename[255];
-	g_snprintf(filename, 255, "%s/%s.cfg", config_path, JANUS_DUKTAPE_PACKAGE);
+	g_snprintf(filename, 255, "%s/%s.jcfg", config_path, JANUS_DUKTAPE_PACKAGE);
 	JANUS_LOG(LOG_VERB, "Configuration file: %s\n", filename);
 	janus_config *config = janus_config_parse(filename);
+	if(config == NULL) {
+		JANUS_LOG(LOG_WARN, "Couldn't find .jcfg configuration file (%s), trying .cfg\n", JANUS_DUKTAPE_PACKAGE);
+		g_snprintf(filename, 255, "%s/%s.cfg", config_path, JANUS_DUKTAPE_PACKAGE);
+		JANUS_LOG(LOG_VERB, "Configuration file: %s\n", filename);
+		config = janus_config_parse(filename);
+	}
 	if(config == NULL) {
 		/* No config means no JS script */
 		JANUS_LOG(LOG_ERR, "Failed to load configuration file for Duktape plugin...\n");
 		return -1;
 	}
 	janus_config_print(config);
-	janus_config_item *folder = janus_config_get_item_drilldown(config, "general", "path");
+	janus_config_category *config_general = janus_config_get_create(config, NULL, janus_config_type_category, "general");
+	janus_config_item *folder = janus_config_get(config, config_general, janus_config_type_item, "path");
 	if(folder && folder->value)
 		duktape_folder = g_strdup(folder->value);
-	janus_config_item *script = janus_config_get_item_drilldown(config, "general", "script");
+	janus_config_item *script = janus_config_get(config, config_general, janus_config_type_item, "script");
 	if(script == NULL || script->value == NULL) {
 		JANUS_LOG(LOG_ERR, "Missing script path in Duktape plugin configuration...\n");
 		janus_config_destroy(config);
@@ -1243,7 +1250,7 @@ int janus_duktape_init(janus_callbacks *callback, const char *config_path) {
 	}
 	char *duktape_file = g_strdup(script->value);
 	char *duktape_config = NULL;
-	janus_config_item *conf = janus_config_get_item_drilldown(config, "general", "config");
+	janus_config_item *conf = janus_config_get(config, config_general, janus_config_type_item, "config");
 	if(conf && conf->value)
 		duktape_config = g_strdup(conf->value);
 	janus_config_destroy(config);
@@ -2106,7 +2113,7 @@ void janus_duktape_incoming_rtcp(janus_plugin_session *handle, int video, char *
 	}
 }
 
-void janus_duktape_incoming_data(janus_plugin_session *handle, char *buf, int len) {
+void janus_duktape_incoming_data(janus_plugin_session *handle, char *label, char *buf, int len) {
 	if(handle == NULL || handle->stopped || g_atomic_int_get(&duktape_stopping) || !g_atomic_int_get(&duktape_initialized))
 		return;
 	janus_duktape_session *session = (janus_duktape_session *)handle->plugin_handle;
@@ -2294,7 +2301,7 @@ static void janus_duktape_relay_data_packet(gpointer data, gpointer user_data) {
 	if(janus_core != NULL && text != NULL) {
 		JANUS_LOG(LOG_VERB, "Forwarding DataChannel message (%zu bytes) to session %"SCNu32": %s\n",
 			strlen(text), session->id, text);
-		janus_core->relay_data(session->handle, text, strlen(text));
+		janus_core->relay_data(session->handle, NULL, text, strlen(text));
 	}
 	return;
 }

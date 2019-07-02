@@ -295,7 +295,6 @@ struct janus_plugin_result *janus_recordplay_handle_message(janus_plugin_session
 void janus_recordplay_setup_media(janus_plugin_session *handle);
 void janus_recordplay_incoming_rtp(janus_plugin_session *handle, int video, char *buf, int len);
 void janus_recordplay_incoming_rtcp(janus_plugin_session *handle, int video, char *buf, int len);
-void janus_recordplay_incoming_data(janus_plugin_session *handle, char *buf, int len);
 void janus_recordplay_slow_link(janus_plugin_session *handle, int uplink, int video);
 void janus_recordplay_hangup_media(janus_plugin_session *handle);
 void janus_recordplay_destroy_session(janus_plugin_session *handle, int *error);
@@ -320,7 +319,6 @@ static janus_plugin janus_recordplay_plugin =
 		.setup_media = janus_recordplay_setup_media,
 		.incoming_rtp = janus_recordplay_incoming_rtp,
 		.incoming_rtcp = janus_recordplay_incoming_rtcp,
-		.incoming_data = janus_recordplay_incoming_data,
 		.slow_link = janus_recordplay_slow_link,
 		.hangup_media = janus_recordplay_hangup_media,
 		.destroy_session = janus_recordplay_destroy_session,
@@ -425,6 +423,8 @@ typedef struct janus_recordplay_session {
 	gint video_fir_seq;
 	janus_rtp_switching_context context;
 	uint32_t ssrc[3];		/* Only needed in case VP8 (or H.264) simulcasting is involved */
+	char *rid[3];			/* Only needed if simulcasting is rid-based */
+	uint32_t rec_vssrc;		/* SSRC we'll put in the recording for video, in case simulcasting is involved) */
 	janus_rtp_simulcasting_context sim_context;
 	janus_vp8_simulcast_context vp8_context;
 	volatile gint hangingup;
@@ -687,17 +687,24 @@ int janus_recordplay_init(janus_callbacks *callback, const char *config_path) {
 
 	/* Read configuration */
 	char filename[255];
-	g_snprintf(filename, 255, "%s/%s.cfg", config_path, JANUS_RECORDPLAY_PACKAGE);
+	g_snprintf(filename, 255, "%s/%s.jcfg", config_path, JANUS_RECORDPLAY_PACKAGE);
 	JANUS_LOG(LOG_VERB, "Configuration file: %s\n", filename);
 	janus_config *config = janus_config_parse(filename);
+	if(config == NULL) {
+		JANUS_LOG(LOG_WARN, "Couldn't find .jcfg configuration file (%s), trying .cfg\n", JANUS_RECORDPLAY_PACKAGE);
+		g_snprintf(filename, 255, "%s/%s.cfg", config_path, JANUS_RECORDPLAY_PACKAGE);
+		JANUS_LOG(LOG_VERB, "Configuration file: %s\n", filename);
+		config = janus_config_parse(filename);
+	}
 	if(config != NULL)
 		janus_config_print(config);
 	/* Parse configuration */
 	if(config != NULL) {
-		janus_config_item *path = janus_config_get_item_drilldown(config, "general", "path");
+		janus_config_category *config_general = janus_config_get_create(config, NULL, janus_config_type_category, "general");
+		janus_config_item *path = janus_config_get(config, config_general, janus_config_type_item, "path");
 		if(path && path->value)
 			recordings_path = g_strdup(path->value);
-		janus_config_item *events = janus_config_get_item_drilldown(config, "general", "events");
+		janus_config_item *events = janus_config_get(config, config_general, janus_config_type_item, "events");
 		if(events != NULL && events->value != NULL)
 			notify_events = janus_is_true(events->value);
 		if(!notify_events && callback->events_is_enabled()) {
@@ -1134,7 +1141,7 @@ void janus_recordplay_incoming_rtp(janus_plugin_session *handle, int video, char
 		return;
 	if(!session->recorder || !session->recording)
 		return;
-	if(video && session->ssrc[0] != 0) {
+	if(video && (session->ssrc[0] != 0 || session->rid[0] != NULL)) {
 		/* Handle simulcast: backup the header information first */
 		janus_rtp_header *header = (janus_rtp_header *)buf;
 		uint32_t seq_number = ntohs(header->seq_number);
@@ -1142,7 +1149,7 @@ void janus_recordplay_incoming_rtp(janus_plugin_session *handle, int video, char
 		uint32_t ssrc = ntohl(header->ssrc);
 		/* Process this packet: don't save if it's not the SSRC/layer we wanted to handle */
 		gboolean save = janus_rtp_simulcasting_context_process_rtp(&session->sim_context,
-			buf, len, session->ssrc, session->recording->vcodec, &session->context);
+			buf, len, session->ssrc, session->rid, session->recording->vcodec, &session->context);
 		/* Do we need to drop this? */
 		if(!save)
 			return;
@@ -1162,7 +1169,9 @@ void janus_recordplay_incoming_rtp(janus_plugin_session *handle, int video, char
 			janus_vp8_simulcast_descriptor_update(payload, plen, &session->vp8_context, session->sim_context.changed_substream);
 		}
 		/* Save the frame if we're recording (and make sure the SSRC never changes even if the substream does) */
-		header->ssrc = htonl(session->ssrc[0]);
+		if(session->rec_vssrc == 0)
+			session->rec_vssrc = g_random_int();
+		header->ssrc = htonl(session->rec_vssrc);
 		janus_recorder_save_frame(session->vrc, buf, len);
 		/* Restore header or core statistics will be messed up */
 		header->ssrc = htonl(ssrc);
@@ -1179,12 +1188,6 @@ void janus_recordplay_incoming_rtp(janus_plugin_session *handle, int video, char
 void janus_recordplay_incoming_rtcp(janus_plugin_session *handle, int video, char *buf, int len) {
 	if(handle == NULL || g_atomic_int_get(&handle->stopped) || g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized))
 		return;
-}
-
-void janus_recordplay_incoming_data(janus_plugin_session *handle, char *buf, int len) {
-	if(handle == NULL || g_atomic_int_get(&handle->stopped) || g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized))
-		return;
-	/* FIXME We don't care */
 }
 
 void janus_recordplay_slow_link(janus_plugin_session *handle, int uplink, int video) {
@@ -1315,6 +1318,12 @@ static void janus_recordplay_hangup_media_internal(janus_plugin_session *handle)
 	if(session->recording) {
 		janus_refcount_decrease(&session->recording->ref);
 		session->recording = NULL;
+	}
+	int i=0;
+	for(i=0; i<3; i++) {
+		session->ssrc[i] = 0;
+		g_free(session->rid[i]);
+		session->rid[i] = NULL;
 	}
 	g_atomic_int_set(&session->hangingup, 0);
 }
@@ -1540,6 +1549,11 @@ recdone:
 				JANUS_SDP_OA_VIDEO_CODEC, janus_videocodec_name(rec->vcodec),
 				JANUS_SDP_OA_VIDEO_DIRECTION, JANUS_SDP_RECVONLY,
 				JANUS_SDP_OA_DATA, FALSE,
+				JANUS_SDP_OA_ACCEPT_EXTMAP, JANUS_RTP_EXTMAP_MID,
+				JANUS_SDP_OA_ACCEPT_EXTMAP, JANUS_RTP_EXTMAP_RID,
+				JANUS_SDP_OA_ACCEPT_EXTMAP, JANUS_RTP_EXTMAP_REPAIRED_RID,
+				JANUS_SDP_OA_ACCEPT_EXTMAP, JANUS_RTP_EXTMAP_FRAME_MARKING,
+				JANUS_SDP_OA_ACCEPT_EXTMAP, JANUS_RTP_EXTMAP_TRANSPORT_WIDE_CC,
 				JANUS_SDP_OA_DONE);
 			g_free(answer->s_name);
 			char s_name[100];
@@ -1557,16 +1571,20 @@ recdone:
 			json_t *msg_simulcast = json_object_get(msg->jsep, "simulcast");
 			if(msg_simulcast) {
 				JANUS_LOG(LOG_VERB, "Recording client negotiated simulcasting\n");
-				session->ssrc[0] = json_integer_value(json_object_get(msg_simulcast, "ssrc-0"));
-				session->ssrc[1] = json_integer_value(json_object_get(msg_simulcast, "ssrc-1"));
-				session->ssrc[2] = json_integer_value(json_object_get(msg_simulcast, "ssrc-2"));
+				int rid_ext_id = -1, framemarking_ext_id = -1;
+				janus_rtp_simulcasting_prepare(msg_simulcast, &rid_ext_id, &framemarking_ext_id, session->ssrc, session->rid);
+				session->sim_context.rid_ext_id = rid_ext_id;
+				session->sim_context.framemarking_ext_id = framemarking_ext_id;
 				session->sim_context.substream_target = 2;	/* Let's aim for the highest quality */
 				session->sim_context.templayer_target = 2;	/* Let's aim for all temporal layers */
 				if(rec->vcodec != JANUS_VIDEOCODEC_VP8 && rec->vcodec != JANUS_VIDEOCODEC_H264) {
 					/* VP8 r H.264 were not negotiated, if simulcasting was enabled then disable it here */
-					session->ssrc[0] = 0;
-					session->ssrc[1] = 0;
-					session->ssrc[2] = 0;
+					int i=0;
+					for(i=0; i<3; i++) {
+						session->ssrc[i] = 0;
+						g_free(session->rid[i]);
+						session->rid[i] = NULL;
+					}
 				}
 			}
 			/* Done! */
@@ -1727,8 +1745,8 @@ playdone:
 					gateway->notify_event(&janus_recordplay_plugin, session->handle, info);
 				}
 			}
-			/* Stop the recording/playout */
-			janus_recordplay_hangup_media(session->handle);
+			/* Tell the core to tear down the PeerConnection, hangup_media will do the rest */
+			gateway->close_pc(session->handle);
 		} else {
 			JANUS_LOG(LOG_ERR, "Unknown request '%s'\n", request_text);
 			error_code = JANUS_RECORDPLAY_ERROR_INVALID_REQUEST;
@@ -1823,7 +1841,7 @@ void janus_recordplay_update_recordings_list(void) {
 			JANUS_LOG(LOG_ERR, "Invalid recording '%s'...\n", recent->d_name);
 			continue;
 		}
-		GList *cl = janus_config_get_categories(nfo);
+		GList *cl = janus_config_get_categories(nfo, NULL);
 		if(cl == NULL || cl->data == NULL) {
 			JANUS_LOG(LOG_WARN, "No recording info in '%s', skipping...\n", recent->d_name);
 			janus_config_destroy(nfo);
@@ -1833,24 +1851,27 @@ void janus_recordplay_update_recordings_list(void) {
 		guint64 id = g_ascii_strtoull(cat->name, NULL, 0);
 		if(id == 0) {
 			JANUS_LOG(LOG_WARN, "Invalid ID, skipping...\n");
+			g_list_free(cl);
 			janus_config_destroy(nfo);
 			continue;
 		}
 		janus_recordplay_recording *rec = g_hash_table_lookup(recordings, &id);
 		if(rec != NULL) {
 			JANUS_LOG(LOG_VERB, "Skipping recording with ID %"SCNu64", it's already in the list...\n", id);
+			g_list_free(cl);
 			janus_config_destroy(nfo);
 			/* Mark that we updated this recording */
 			old_recordings = g_list_remove(old_recordings, &rec->id);
 			janus_refcount_decrease(&rec->ref);
 			continue;
 		}
-		janus_config_item *name = janus_config_get_item(cat, "name");
-		janus_config_item *date = janus_config_get_item(cat, "date");
-		janus_config_item *audio = janus_config_get_item(cat, "audio");
-		janus_config_item *video = janus_config_get_item(cat, "video");
+		janus_config_item *name = janus_config_get(nfo, cat, janus_config_type_item, "name");
+		janus_config_item *date = janus_config_get(nfo, cat, janus_config_type_item, "date");
+		janus_config_item *audio = janus_config_get(nfo, cat, janus_config_type_item, "audio");
+		janus_config_item *video = janus_config_get(nfo, cat, janus_config_type_item, "video");
 		if(!name || !name->value || strlen(name->value) == 0 || !date || !date->value || strlen(date->value) == 0) {
 			JANUS_LOG(LOG_WARN, "Invalid info for recording %"SCNu64", skipping...\n", id);
+			g_list_free(cl);
 			janus_config_destroy(nfo);
 			continue;
 		}
@@ -1899,6 +1920,7 @@ void janus_recordplay_update_recordings_list(void) {
 		janus_refcount_init(&rec->ref, janus_recordplay_recording_free);
 		janus_mutex_init(&rec->mutex);
 
+		g_list_free(cl);
 		janus_config_destroy(nfo);
 
 		/* Add to the list of recordings */

@@ -1,4 +1,5 @@
-AC_INIT([Janus WebRTC Server],[0.6.0],[https://github.com/meetecho/janus-gateway],[janus-gateway],[https://janus.conf.meetecho.com])
+AC_INIT([Janus WebRTC Server],[0.7.2],[https://github.com/meetecho/janus-gateway],[janus-gateway],[https://janus.conf.meetecho.com])
+AC_LANG(C)
 AC_CONFIG_AUX_DIR([.])
 AC_CONFIG_MACRO_DIR([m4])
 
@@ -8,26 +9,82 @@ AC_ENABLE_STATIC(no)
 AM_INIT_AUTOMAKE([foreign subdir-objects])
 AM_SILENT_RULES([yes])
 
-AC_GNU_SOURCE
+#AC_GNU_SOURCE has been deprecated (https://www.gnu.org/software/autoconf/manual/autoconf-2.69/html_node/Obsolete-Macros.html)
+AC_USE_SYSTEM_EXTENSIONS
 
 AC_PROG_CC
 
 LT_PREREQ([2.2])
 LT_INIT
 
-JANUS_VERSION=60
+# Common CFLAGS
+CFLAGS="$CFLAGS \
+	-fPIC \
+	-fstack-protector-all \
+	-fstrict-aliasing \
+	-ggdb3 \
+	-pthread \
+	-Wall \
+	-Warray-bounds \
+	-Wextra \
+	-Wformat-nonliteral \
+	-Wformat-security \
+	-Wformat=2 \
+	-Winit-self \
+	-Winline \
+	-Wlarger-than=65537 \
+	-Wmissing-declarations \
+	-Wmissing-format-attribute \
+	-Wmissing-include-dirs \
+	-Wmissing-noreturn \
+	-Wmissing-prototypes \
+	-Wnested-externs \
+	-Wno-aggregate-return \
+	-Wno-missing-field-initializers \
+	-Wno-redundant-decls \
+	-Wno-undef \
+	-Wno-unused-parameter \
+	-Wold-style-definition \
+	-Wpacked \
+	-Wpointer-arith \
+	-Wsign-compare \
+	-Wstrict-prototypes \
+	-Wswitch-default \
+	-Wunused \
+	-Wwrite-strings"
+
+case "$CC" in
+clang*)
+	# Specific clang flags
+	CFLAGS="$CFLAGS \
+		-Wno-cast-align \
+		-Wno-initializer-overrides"
+;;
+*)
+	# Specific gcc flags
+	CFLAGS="$CFLAGS \
+		-Wcast-align \
+		-Wno-override-init \
+		-Wunsafe-loop-optimizations \
+		-Wunused-but-set-variable"
+esac
+
+JANUS_VERSION=72
 AC_SUBST(JANUS_VERSION)
-JANUS_VERSION_STRING="0.6.0"
+JANUS_VERSION_STRING="0.7.2"
 AC_SUBST(JANUS_VERSION_STRING)
 
 case "$host_os" in
 darwin*)
 	CFLAGS="$CFLAGS -I/usr/local/opt/openssl/include -I/usr/local/include"
+	# add rdynamic to LDFLAGS
+	LDFLAGS="$LDFLAGS -Wl,-export_dynamic"
 	LDFLAGS="$LDFLAGS -L/usr/local/lib -L/usr/local/opt/openssl/lib -L/opt/local/lib -L/usr/local/libsrtp/lib"
 	AM_CONDITIONAL([DARWIN_OS], true)
 	AM_CONDITIONAL([HAS_DTLS_WINDOW_SIZE], false)
 ;;
 *)
+	LDFLAGS="$LDFLAGS -Wl,--export-dynamic"
 	AM_CONDITIONAL([DARWIN_OS], false)
 	AM_CONDITIONAL([HAS_DTLS_WINDOW_SIZE], true)
 esac
@@ -238,12 +295,13 @@ AC_ARG_ENABLE([systemd-sockets],
 PKG_CHECK_MODULES([JANUS],
                   [
                     glib-2.0 >= $glib_version
+					libconfig
                     nice
                     jansson >= $jansson_version
                     libssl >= $ssl_version
                     libcrypto
                   ])
-JANUS_MANUAL_LIBS+=" -lm"
+JANUS_MANUAL_LIBS="${JANUS_MANUAL_LIBS} -lm"
 AC_SUBST(JANUS_MANUAL_LIBS)
 
 AS_IF([test "x${boringssl_dir}" != "x"],
@@ -293,7 +351,7 @@ AC_CHECK_LIB([nice],
 
 AC_CHECK_LIB([dl],
              [dlopen],
-             [JANUS_MANUAL_LIBS+=" -ldl"],
+             [JANUS_MANUAL_LIBS="${JANUS_MANUAL_LIBS} -ldl"],
              [AC_MSG_ERROR([libdl not found.])])
 
 AM_CONDITIONAL([ENABLE_LIBSRTP_2], false)
@@ -304,7 +362,7 @@ AS_IF([test "x$enable_libsrtp2" != "xno"],
                       AC_CHECK_HEADER([srtp2/srtp.h],
                                       [
                                         AC_DEFINE(HAVE_SRTP_2)
-                                        JANUS_MANUAL_LIBS+=" -lsrtp2"
+                                        JANUS_MANUAL_LIBS="${JANUS_MANUAL_LIBS} -lsrtp2"
                                         enable_libsrtp2=yes
                                         AM_CONDITIONAL([ENABLE_LIBSRTP_2], true)
                                         AC_CHECK_LIB([srtp2],
@@ -329,7 +387,7 @@ AM_COND_IF([ENABLE_LIBSRTP_2],
                          [
                            AC_CHECK_HEADER([srtp/srtp.h],
                                            [
-                                             JANUS_MANUAL_LIBS+=" -lsrtp"
+                                             JANUS_MANUAL_LIBS="${JANUS_MANUAL_LIBS} -lsrtp"
                                              enable_libsrtp2=no
                                              PKG_CHECK_MODULES([SRTP15X],
                                                                [
@@ -351,7 +409,7 @@ AC_CHECK_LIB([usrsctp],
                AS_IF([test "x$enable_data_channels" != "xno"],
                [
                   AC_DEFINE(HAVE_SCTP)
-                  JANUS_MANUAL_LIBS+=" -lusrsctp"
+                  JANUS_MANUAL_LIBS="${JANUS_MANUAL_LIBS} -lusrsctp"
                   enable_data_channels=yes
                ])
              ],
@@ -364,17 +422,17 @@ AM_CONDITIONAL([ENABLE_SCTP], [test "x$enable_data_channels" = "xyes"])
 PKG_CHECK_MODULES([LIBCURL],
                   [libcurl],
                   [
+                    AC_DEFINE(HAVE_LIBCURL)
+                    JANUS_MANUAL_LIBS="${JANUS_MANUAL_LIBS} -lcurl"
                     AS_IF(
                       [test "x$enable_turn_rest_api" != "xno"],
                       [
-                        AC_DEFINE(HAVE_LIBCURL)
-                        JANUS_MANUAL_LIBS+=" -lcurl"
+                        AC_DEFINE(HAVE_TURNRESTAPI)
                         enable_turn_rest_api=yes
                       ])
                     AS_IF([test "x$enable_sample_event_handler" != "xno"],
                       [
                         AC_DEFINE(HAVE_SAMPLEEVH)
-                        JANUS_MANUAL_LIBS+=" -lcurl"
                         enable_sample_event_handler=yes
                       ])
                   ],
@@ -874,7 +932,7 @@ AC_OUTPUT
 # Summary
 ##
 echo
-
+echo "Compiler:                  $CC"
 AM_COND_IF([ENABLE_LIBSRTP_2],
 	[echo "libsrtp version:           2.x"],
 	[echo "libsrtp version:           1.5.x"])
