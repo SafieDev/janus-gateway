@@ -98,7 +98,7 @@
 \endverbatim
  */
 
-//#define USE_PULSE_AUDIO
+//#define JANUS_USE_PLUSE_AUDIO
 //#define SAFIE_WEARABLE_DEBUG_PRINT_LATENCY
 //#define DUMP_RAW_PCM
 
@@ -113,7 +113,7 @@
 #include <fcntl.h>
 #include <opus/opus.h>
 
-#if defined(USE_PULSE_AUDIO)
+#if defined(JANUS_USE_PLUSE_AUDIO)
 #include <pulse/simple.h>
 #include <pulse/error.h>
 #else
@@ -346,10 +346,13 @@ static GAsyncQueue *player_request_queue = NULL;
 static janus_safievoice_player_request_message player_exit_message;
 static janus_safievoice_player_request_message player_open_message;
 static janus_safievoice_player_request_message player_close_message;
+static gint32 play_buffer_alloc_cnt = 0;
+static gint32 play_buffer_free_cnt = 0;
 static janus_safievoice_player_request_message* janus_safievoice_player_request_message_alloc(void) {
     janus_safievoice_player_request_message* msg = g_malloc(
 		sizeof(janus_safievoice_player_request_message) + MIN_BUFFER_SIZE_TO_DECODE);
     msg->pcm_buf = (opus_int16*)&msg[1];
+	play_buffer_alloc_cnt ++;
     return msg;
 }
 static void janus_safievoice_player_request_message_free(janus_safievoice_player_request_message *msg) {
@@ -360,6 +363,7 @@ static void janus_safievoice_player_request_message_free(janus_safievoice_player
 		return;
 	}
 
+	play_buffer_free_cnt ++;
 	g_free(msg);
 }
 
@@ -410,6 +414,9 @@ typedef struct janus_safievoice_record_message {
 	janus_safievoice_rtp_relay_packet* outpkt;
 } janus_safievoice_record_message;
 
+static gint32 record_buffer_alloc_cnt = 0;
+static gint32 record_buffer_free_cnt = 0;
+
 static janus_safievoice_record_message* janus_safievoice_record_message_alloc(void) {
 	gint64 start_time = janus_get_monotonic_time();
 
@@ -429,6 +436,8 @@ static janus_safievoice_record_message* janus_safievoice_record_message_alloc(vo
 	msg->encoded_time  = 0;
 	msg->sample_num    = RECORD_FRAME_SAMPLE_NUM;
 
+	record_buffer_alloc_cnt ++;
+
     return msg;
 }
 
@@ -441,6 +450,7 @@ static void janus_safievoice_record_message_free(janus_safievoice_record_message
 		) {
 		return;
 	}
+	record_buffer_free_cnt ++;
 	g_free(msg);
 }
 
@@ -725,6 +735,7 @@ static janus_safievoice_session *janus_safievoice_lookup_session(janus_plugin_se
 
 void janus_safievoice_create_session(janus_plugin_session *handle, int *error) {
 	if(g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized)) {
+		JANUS_LOG(LOG_ERR, "failded to create session as stopping!!\n");
 		*error = -1;
 		return;
 	}
@@ -756,6 +767,7 @@ void janus_safievoice_create_session(janus_plugin_session *handle, int *error) {
     janus_safievoice_player_response_message *msg =
         g_async_queue_timeout_pop(player_response_queue, PLAYER_RESPONSE_TIMEOUT);
     if ((msg == NULL) || (msg != &player_open_succeeded)) {
+		JANUS_LOG(LOG_ERR, "failded to create session as player can not be open!\n");
         *error = -1;
         return;
     }
@@ -1135,7 +1147,7 @@ static void janus_safievoice_hangup_media_internal(janus_plugin_session *handle)
 
 /* Thread to handle incoming messages */
 static void *janus_safievoice_handler(void *data) {
-	JANUS_LOG(LOG_VERB, "Joining SafieVoice handler thread\n");
+	JANUS_LOG(LOG_VERB, "SafieVoice handler thread started\n");
 	janus_safievoice_message *msg = NULL;
 	int error_code = 0;
 	char error_cause[512];
@@ -1371,49 +1383,131 @@ error:
 	return NULL;
 }
 
-#if !defined(USE_PULSE_AUDIO)
+#if !defined(JANUS_USE_PLUSE_AUDIO)
 static snd_pcm_t* pcm_alsa_open(snd_pcm_stream_t stream);
 static int pcm_alsa_playback(snd_pcm_t *pcm_handler, opus_int16* pcm_buf, uint32_t sample_num);
 static void pcm_alsa_close(snd_pcm_t *pcm_handler);
 
 static snd_pcm_t* pcm_alsa_open(snd_pcm_stream_t stream)
 {
-    static gboolean is_retrying = FALSE;
+    static gboolean is_retrying[SND_PCM_STREAM_LAST] = {FALSE, FALSE};
     unsigned int err;
     snd_pcm_t *pcm_handler = NULL;
 
 	/* Open the PCM device in playback mode */
-	err = snd_pcm_open(&pcm_handler, "default", stream, SND_PCM_NONBLOCK);
+	err = snd_pcm_open(&pcm_handler, "default", stream, 
+#if 0
+						0 /* block */
+#else
+						SND_PCM_NONBLOCK
+#endif
+						);
     if (err != 0) {
-        if (!is_retrying) {
+        if (!is_retrying[stream]) {
             JANUS_LOG(LOG_ERR, "ERROR: Can't open PCM device[%d]. %s\n",
                       stream, snd_strerror(err));
-            is_retrying = TRUE;
+            is_retrying[stream] = TRUE;
         }
         pcm_alsa_close(pcm_handler);
         return NULL;
     }
 
     /* set parameters */
+	unsigned int ch = (stream == SND_PCM_STREAM_CAPTURE) ?  RECORD_CHANNEL_NUM : CHANNELS;
+	unsigned int sample_rate = (stream == SND_PCM_STREAM_CAPTURE) ? RECORD_SAMPLE_RATE : SAMPLE_RATE;
+	unsigned int latency = (stream == SND_PCM_STREAM_CAPTURE) ? RECORD_LATENCY_IN_USEC : PLAYBACK_LATENCY_IN_USEC;
     err = snd_pcm_set_params(pcm_handler,
                              SND_PCM_FORMAT_S16_LE,
                              SND_PCM_ACCESS_RW_INTERLEAVED,
-                             CHANNELS,
-                             SAMPLE_RATE,
-                             1,
-                             PLAYBACK_LATENCY_IN_USEC);
+                             ch, sample_rate, 1, latency);
     if (err != 0) {
-        if (!is_retrying) {
+        if (!is_retrying[stream]) {
             JANUS_LOG(LOG_ERR, "PCM device[%d] open error: %s\n", stream, snd_strerror(err));
-            is_retrying = TRUE;
+            is_retrying[stream] = TRUE;
         }
         pcm_alsa_close(pcm_handler);
         return NULL;
     }
 
-    is_retrying = FALSE;
+    is_retrying[stream] = FALSE;
     JANUS_LOG(LOG_WARN, "opened PCM device[%d].\n", stream);
     return pcm_handler;
+}
+
+static int pcm_alsa_io(snd_pcm_t *pcm_handler, opus_int16* pcm_buf, uint32_t sample_num)
+{
+    int pcm_ret;
+
+    if (pcm_handler == NULL) {
+        JANUS_LOG(LOG_ERR, "ERROR. pcm_handler == NULL!\n");
+        return -1;
+    }
+
+	snd_pcm_stream_t stream = snd_pcm_stream(pcm_handler);
+	const char* stream_type = ((stream == SND_PCM_STREAM_CAPTURE) ? "capture" : "play");
+    int remain_size = sample_num;
+    uint32_t retry_cnt = 0;
+    while (remain_size > 0) {
+		if (stream == SND_PCM_STREAM_CAPTURE) {
+			uint32_t offset = (sample_num - remain_size) * RECORD_CHANNEL_NUM;
+        	pcm_ret = snd_pcm_readi(pcm_handler, pcm_buf + offset, remain_size);
+		} else {
+			uint32_t offset = (sample_num - remain_size) * CHANNELS;
+			pcm_ret = snd_pcm_writei(pcm_handler, pcm_buf + offset, remain_size);
+		}
+        if (pcm_ret == -EAGAIN) {
+			// todo: improve performance
+            if (retry_cnt > 20000) {
+                JANUS_LOG(LOG_ERR, "[%s]failed, retry cnt=%d. progress=%d/%d\n", 
+					stream_type, retry_cnt, sample_num - remain_size, sample_num);
+                return pcm_ret;
+            }
+            retry_cnt++;
+        } else if (pcm_ret == -EPIPE) {
+            JANUS_LOG(LOG_WARN, "[%s] overrun. progress=%d/%d\n", 
+				stream_type, sample_num - remain_size, sample_num);
+			int err;
+            if ((err = snd_pcm_recover(pcm_handler, pcm_ret, 0)) < 0) {
+    			JANUS_LOG(LOG_WARN, "[%s] recover failed: %s\n", 
+					stream_type, snd_strerror(err));
+                return err;
+            }
+        } else if (pcm_ret == -EBADFD) {
+            JANUS_LOG(LOG_ERR, "[%s] PCM is not in the right state. progress=%d/%d\n", 
+				stream_type, sample_num - remain_size, sample_num);
+			return pcm_ret;
+		} else if (pcm_ret == -ESTRPIPE) {
+            JANUS_LOG(LOG_ERR, "[%s]a suspend event occurred . progress=%d/%d\n",
+				stream_type, sample_num - remain_size, sample_num);
+			int err;
+        	while ((err = snd_pcm_resume(pcm_handler)) == -EAGAIN) {
+				JANUS_LOG(LOG_ERR, "[%s]waitng for resume . progress=%d/%d\n",
+					stream_type, sample_num - remain_size, sample_num);
+            	sleep(1);   /* wait until the suspend flag is released */
+			}
+        	if (err < 0) {
+            	if ((err = snd_pcm_prepare(pcm_handler)) < 0) {
+	                JANUS_LOG(LOG_ERR, "[%s]Can't recovery from suspend, prepare failed: %s\n", 
+						stream_type, snd_strerror(err));
+					return err;
+				}
+			}
+		} else if (pcm_ret < 0) {
+            JANUS_LOG(LOG_ERR, "[%s]ERROR. progress=%d/%d, pcm_ret=%d, %s\n",
+						stream_type, sample_num - remain_size, sample_num,
+                      	pcm_ret, snd_strerror(pcm_ret));
+            return pcm_ret;
+        } else if (pcm_ret > remain_size) {
+            JANUS_LOG(LOG_ERR, "[%s]ERROR? progress=%d/%d, pcm_ret=%d\n",
+						stream_type,
+					  	sample_num - remain_size, sample_num, pcm_ret);
+            return pcm_ret;
+        } else {
+            remain_size -= pcm_ret;
+        }
+    }
+
+	return 0;
 }
 
 static int pcm_alsa_playback(snd_pcm_t *pcm_handler, opus_int16* pcm_buf, uint32_t sample_num)
@@ -1421,7 +1515,7 @@ static int pcm_alsa_playback(snd_pcm_t *pcm_handler, opus_int16* pcm_buf, uint32
     int pcm_ret;
 
     if (pcm_handler == NULL) {
-        JANUS_LOG(LOG_ERR, "ERROR. pcm_handler == NULL\n");
+        JANUS_LOG(LOG_ERR, "ERROR. pcm_handler == NULL!\n");
         return -1;
     }
 
@@ -1432,7 +1526,11 @@ static int pcm_alsa_playback(snd_pcm_t *pcm_handler, opus_int16* pcm_buf, uint32
         pcm_ret = snd_pcm_writei(pcm_handler, pcm_buf + offset, write_size);
         if (pcm_ret == -EAGAIN) {
             if (retry_cnt > 10000) {
-                JANUS_LOG(LOG_WARN, "pcm_alsa_playback, retry cnt=%d.\n", retry_cnt);
+                JANUS_LOG(LOG_WARN, "pcm_alsa_playback, retry cnt=%d.\n[%lld, %lld]\n", 
+					retry_cnt, 
+					play_buffer_alloc_cnt - play_buffer_free_cnt,
+					record_buffer_alloc_cnt - record_buffer_free_cnt
+				);
                 return 1;
             }
             retry_cnt++;
@@ -1574,7 +1672,7 @@ static void pcm_pulse_close(pa_simple *pcm_handler)
 
 #endif
 
-#if !defined(USE_PULSE_AUDIO)
+#if !defined(JANUS_USE_PLUSE_AUDIO)
 static snd_pcm_t *speaker_handler = NULL;
 #else
 static pa_simple *speaker_handler = NULL;
@@ -1583,7 +1681,7 @@ static pa_simple *speaker_handler = NULL;
 static gboolean pcm_speaker_open(void)
 {
 	if (speaker_handler == NULL) {
-#if !defined(USE_PULSE_AUDIO)
+#if !defined(JANUS_USE_PLUSE_AUDIO)
     	speaker_handler = pcm_alsa_open(SND_PCM_STREAM_PLAYBACK);
 #else
 		int error = 0;
@@ -1597,7 +1695,7 @@ static gboolean pcm_speaker_open(void)
 #endif
 	}
 
-	return (speaker_handler == NULL);
+	return (speaker_handler != NULL);
 }
 
 static int pcm_speaker_playback(opus_int16* pcm_buf, uint32_t sample_num)
@@ -1611,8 +1709,8 @@ static int pcm_speaker_playback(opus_int16* pcm_buf, uint32_t sample_num)
         }
     }
 
-#if !defined(USE_PULSE_AUDIO)
-    ret = pcm_alsa_playback(speaker_handler, pcm_buf, sample_num);
+#if !defined(JANUS_USE_PLUSE_AUDIO)
+    ret = pcm_alsa_io(speaker_handler, pcm_buf, sample_num);
 #else
 	int error = 0;
     ret = pcm_pulse_playback(speaker_handler, pcm_buf, sample_num, &error);
@@ -1627,7 +1725,7 @@ static int pcm_speaker_playback(opus_int16* pcm_buf, uint32_t sample_num)
 static void pcm_speaker_close(void)
 {
 	if (speaker_handler != NULL) {
-#if !defined(USE_PULSE_AUDIO)
+#if !defined(JANUS_USE_PLUSE_AUDIO)
 		pcm_alsa_close(speaker_handler);
 #else
 		pcm_pulse_close(speaker_handler);
@@ -1641,7 +1739,7 @@ static void *janus_safievoice_player(void *data) {
 	janus_safievoice_player_request_message *msg = NULL;
 	static gint64 timeout_cnt = 0;
 
-    JANUS_LOG(LOG_WARN, "Joining SafieVoice player thread\n");
+    JANUS_LOG(LOG_WARN, "SafieVoice player thread started\n");
     while(g_atomic_int_get(&initialized) && !g_atomic_int_get(&stopping)) {
         msg = g_async_queue_timeout_pop(player_request_queue, NO_MEDIA_TIMEOUT);
         if(msg == NULL) {
@@ -1660,7 +1758,7 @@ static void *janus_safievoice_player(void *data) {
 			gboolean ok = pcm_speaker_open();
             /* response to main thread */
             g_async_queue_push(player_response_queue,
-                               ok ? &player_open_failed : &player_open_succeeded);
+                               ok ? &player_open_succeeded : &player_open_failed);
         } else if (msg == &player_close_message) {
             JANUS_LOG(LOG_WARN, "[player thread] received close msg\n");
             pcm_speaker_close();
@@ -1708,14 +1806,18 @@ static void *janus_safievoice_player(void *data) {
 	return NULL;
 }
 
-#if defined(USE_PULSE_AUDIO)
+#if !defined(JANUS_USE_PLUSE_AUDIO)
+static snd_pcm_t *recorder_handler = NULL;
+#else
 static pa_simple *recorder_handler = NULL;
 #endif
 
 static gboolean pcm_recorder_open(void)
 {
-#if defined(USE_PULSE_AUDIO)
 	if (recorder_handler == NULL) {
+#if !defined(JANUS_USE_PLUSE_AUDIO)
+    	recorder_handler = pcm_alsa_open(SND_PCM_STREAM_CAPTURE);
+#else
 		int error = 0;
     	recorder_handler = pcm_pulse_open_record_device(
 								JANUS_SAFIEVOICE_PACKAGE, 
@@ -1724,18 +1826,14 @@ static gboolean pcm_recorder_open(void)
 			JANUS_LOG(LOG_ERR, ": pcm_pulse_open_record_device() failed(%d): %s\n",
 						error, pa_strerror(error));
  		}
+#endif
 	}
 
-	return (recorder_handler == NULL);
-#else
-    // todo
-    return FALSE;
-#endif
+	return (recorder_handler != NULL);
 }
 
 static int pcm_recorder_record(opus_int16* pcm_buf, uint32_t sample_num)
 {
-#if defined(USE_PULSE_AUDIO)
     int ret;
     if (recorder_handler == NULL) {
         pcm_recorder_open();
@@ -1745,34 +1843,33 @@ static int pcm_recorder_record(opus_int16* pcm_buf, uint32_t sample_num)
         }
     }
 
+#if !defined(JANUS_USE_PLUSE_AUDIO)
+    ret = pcm_alsa_io(recorder_handler, pcm_buf, sample_num);
+#else
 	int error = 0;
     ret = pcm_pulse_record(recorder_handler, pcm_buf, sample_num, &error);
 	if (ret < 0) {
 		JANUS_LOG(LOG_ERR, ": pcm_pulse_playback() failed(%d): %s\n", error, pa_strerror(error));
  	}
-
-	return ret;
-#else
-    //todo
-    return -1;
 #endif
+	return ret;
 }
 
 static void pcm_recorder_close(void)
 {
-#if defined(USE_PULSE_AUDIO)
 	if (recorder_handler != NULL) {
+#if !defined(JANUS_USE_PLUSE_AUDIO)
+		pcm_alsa_close(recorder_handler);
+#else
 		pcm_pulse_close(recorder_handler);
+#endif
 		recorder_handler = NULL;
 	}
-#else
-    // todo
-#endif
 }
 
 static void *janus_safievoice_recorder(void *data) {
 	janus_safievoice_recorder_request_message *msg = NULL;
-    JANUS_LOG(LOG_WARN, "Joining SafieVoice recorder thread\n");
+    JANUS_LOG(LOG_WARN, "SafieVoice recorder thread started\n");
 
 	if (!pcm_recorder_open()) {
 		JANUS_LOG(LOG_ERR, "Failed to open pulse recorder\n");
@@ -1795,7 +1892,7 @@ static void *janus_safievoice_recorder(void *data) {
 				janus_safievoice_record_message_alloc();
 			if (pcm_recorder_record(record_job->pcm_buf, 
 									record_job->sample_num) != 0) {
-				JANUS_LOG(LOG_ERR, "[record] failed to record\n");
+				//JANUS_LOG(LOG_ERR, "[record] failed to record\n");
 				janus_safievoice_record_message_free(record_job);
 				continue;
 			}
@@ -1825,7 +1922,7 @@ static void *janus_safievoice_recorder(void *data) {
 
 static void *janus_safievoice_encoder(void *data) {
 	janus_safievoice_record_message *msg = NULL;
-    JANUS_LOG(LOG_WARN, "Joining SafieVoice encoder thread\n");
+    JANUS_LOG(LOG_WARN, "SafieVoice encoder thread started\n");
 
 	static int error_code = 0;
 	static char error_cause[512];
@@ -1935,7 +2032,7 @@ static void janus_safievoice_relay_rtp_packet(
 
 static void *janus_safievoice_uploader(void *data) {
 	janus_safievoice_record_message *msg = NULL;
-    JANUS_LOG(LOG_WARN, "Joining SafieVoice uploader thread\n");
+    JANUS_LOG(LOG_WARN, "SafieVoice uploader thread started\n");
 
 	static gint64 timeout_cnt = 0;
     while(g_atomic_int_get(&initialized) && !g_atomic_int_get(&stopping)) {
