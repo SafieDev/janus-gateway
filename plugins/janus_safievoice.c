@@ -464,12 +464,6 @@ static GThread *uploader_thread;
 static void *janus_safievoice_uploader(void *data);
 static GAsyncQueue *uploader_request_queue = NULL;
 
-
-
-
-static char *recordings_path = NULL;
-static char *recordings_base = NULL;
-
 /* SDP offer/answer template */
 #define sdp_template \
 		"v=0\r\n" \
@@ -544,12 +538,6 @@ int janus_safievoice_init(janus_callbacks *callback, const char *config_path) {
 	/* Parse configuration */
 	if(config != NULL) {
         janus_config_category *config_general = janus_config_get_create(config, NULL, janus_config_type_category, "general");
-        janus_config_item *path = janus_config_get(config, config_general, janus_config_type_item, "path");
-		if(path && path->value)
-			recordings_path = g_strdup(path->value);
-        janus_config_item *base = janus_config_get(config, config_general, janus_config_type_item, "base");
-		if(base && base->value)
-			recordings_base = g_strdup(base->value);
         janus_config_item *events = janus_config_get(config, config_general, janus_config_type_item, "events");
 		if(events != NULL && events->value != NULL)
 			notify_events = janus_is_true(events->value);
@@ -559,22 +547,6 @@ int janus_safievoice_init(janus_callbacks *callback, const char *config_path) {
 		/* Done */
 		janus_config_destroy(config);
 		config = NULL;
-	}
-	if(recordings_path == NULL)
-		recordings_path = g_strdup("./html/recordings/");
-	if(recordings_base == NULL)
-		recordings_base = g_strdup("/recordings/");
-	JANUS_LOG(LOG_VERB, "Recordings path: %s\n", recordings_path);
-	JANUS_LOG(LOG_VERB, "Recordings base: %s\n", recordings_base);
-	/* Create the folder, if needed */
-	struct stat st = {0};
-	if(stat(recordings_path, &st) == -1) {
-		int res = janus_mkdir(recordings_path, 0755);
-		JANUS_LOG(LOG_VERB, "Creating folder: %d\n", res);
-		if(res != 0) {
-			JANUS_LOG(LOG_ERR, "%s", strerror(errno));
-			return -1;	/* No point going on... */
-		}
 	}
 
 	g_atomic_int_set(&initialized, 1);
@@ -1293,9 +1265,6 @@ static void *janus_safievoice_handler(void *data) {
 			event = json_object();
 			json_object_set_new(event, "safievoice", json_string("event"));
 			json_object_set_new(event, "status", json_string("done"));
-			char url[1024];
-			g_snprintf(url, 1024, "%s/janus-safievoice-%"SCNu64".opus", recordings_base, session->recording_id);
-			json_object_set_new(event, "recording", json_string(url));
 			/* Also notify event handlers */
 			if(notify_events && gateway->events_is_enabled()) {
 				json_t *info = json_object();
