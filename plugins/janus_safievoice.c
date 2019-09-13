@@ -139,57 +139,75 @@
 
 #define ARRAY_OF(a)               (sizeof(a) / sizeof(a[0]))
 #define MSEC_PER_SEC              (1000)
-#define USEC_PER_SEC              (1000*MSEC_PER_SEC)
+#define USEC_PER_MSEC             (1000)
+#define USEC_PER_SEC              (USEC_PER_MSEC*MSEC_PER_SEC)
 
 #define PLAYER_RESPONSE_TIMEOUT   (5*USEC_PER_SEC)      /* 5s */
 #define NO_MEDIA_TIMEOUT          (10*USEC_PER_SEC)     /* 10s */
 #define LOG_ALIVE_TIMEOUT         (2*60*USEC_PER_SEC)   /* 2min */
 
-#define SAMPLE_RATE           (48000)
-#define CHANNELS              (2)
-#define SAMPLE_SIZE           sizeof(opus_int16)
-#define BUF_SIZE_PER_SEC      (SAMPLE_RATE*CHANNELS*sizeof(opus_int16))
-
-#define FRAME_SAMPLE_NUM         (20*SAMPLE_RATE/MSEC_PER_SEC)                      /* 20 ms/frame */
-#define USEC_PER_FRAME           ((USEC_PER_SEC * FRAME_SAMPLE_NUM) / SAMPLE_RATE)
-#define PCM_FRAME_BUF_SIZE       (FRAME_SAMPLE_NUM*CHANNELS*sizeof(opus_int16))
-
-#define MIN_SAMPLE_NUM_TO_DECODE  (120*SAMPLE_RATE/1000)     /* to decode opus: maximum packet duration (120ms; 5760 for 48kHz) */
-#define MIN_BUFFER_SIZE_TO_DECODE (MIN_SAMPLE_NUM_TO_DECODE*CHANNELS*sizeof(opus_int16))
-
-#define PLAYBACK_LATENCY_IN_USEC               (500000)  /* 500 ms */
-#define PLAYBACK_LATENCY_BUF_SIZE              (BUF_SIZE_PER_SEC * ((double)PLAYBACK_LATENCY_IN_USEC/USEC_PER_SEC))
 
 #define LATENCY_CONTROL_START_THRESHOLD          (1500000) /* 1.5 s */
 #define LATENCY_CONTROL_EMERGENCY_THRESHOLD      (3000000) /* 3 s */
-#define LATENCY_LEVEL_NUM          (ARRAY_OF(skip_params))
-#define LATENCY_PER_LEVEL             ((LATENCY_CONTROL_EMERGENCY_THRESHOLD - LATENCY_CONTROL_START_THRESHOLD) / LATENCY_LEVEL_NUM)
-#define GET_LATENCY_LEVEL(latency)    ((((latency) - LATENCY_CONTROL_START_THRESHOLD) / LATENCY_PER_LEVEL) % LATENCY_LEVEL_NUM)
+#define LATENCY_LEVEL_NUM                        (ARRAY_OF(skip_params))
+#define LATENCY_PER_LEVEL                        ((LATENCY_CONTROL_EMERGENCY_THRESHOLD - LATENCY_CONTROL_START_THRESHOLD) / LATENCY_LEVEL_NUM)
+#define GET_LATENCY_LEVEL(latency)               ((((latency) - LATENCY_CONTROL_START_THRESHOLD) / LATENCY_PER_LEVEL) % LATENCY_LEVEL_NUM)
 
 static struct janus_safievoice_latency_skip_param {
     const int skip_num;
     const int skip_base;
-    const int clean_buffer_bum;
 } skip_params[] = {
-    {1, 20, 0}, /* level 0 */
-    {1, 15, 0},
-    {1, 10, 0},
-    {1, 6,  0},
-    {1, 5,  0},
-    {1, 4,  0}, /* kill section */
+    {1, 20}, /* level 0 */
+    {1, 15},
+    {1, 10},
+    {1, 6},
+    {1, 5},
+    {1, 4}, /* kill section */
 };
 
 
+/* Playback */
+#define PLAYBACK_SAMPLE_RATE           (48000)
+#define PLAYBACK_CHANNEL_NUM           (2)
+#define PLAYBACK_MSEC_PER_FRAME        (20)
+#define PLAYBACK_USEC_PER_FRAME        (PLAYBACK_MSEC_PER_FRAME*USEC_PER_MSEC)
+#define PLAYBACK_SAMPLE_SIZE           sizeof(opus_int16)
+#define PLAYBACK_PCM_BUF_SIZE_PER_SEC  (PLAYBACK_SAMPLE_RATE*PLAYBACK_CHANNEL_NUM*PLAYBACK_SAMPLE_SIZE)
+#define PLAYBACK_FRAME_SAMPLE_NUM      (PLAYBACK_MSEC_PER_FRAME*PLAYBACK_SAMPLE_RATE/MSEC_PER_SEC)                      /* 20 ms/frame */
+#define PLAYBACK_PCM_FRAME_BUF_SIZE    (PLAYBACK_FRAME_SAMPLE_NUM*PLAYBACK_CHANNEL_NUM*PLAYBACK_SAMPLE_SIZE)
+#define PLAYBACK_PCM_FRAME_PER_PERIOD  (6) /* 6 * 20 = 120 ms*/
+#define PLAYBACK_SAMPLE_NUM_PER_PERIOD (PLAYBACK_PCM_FRAME_PER_PERIOD*PLAYBACK_FRAME_SAMPLE_NUM)
+#define PLAYBACK_PERIOD_NUM            (8) /* max: 17? */
+#define PLAYBACK_PERIOD_IN_USEC        (PLAYBACK_PCM_FRAME_PER_PERIOD*PLAYBACK_MSEC_PER_FRAME*USEC_PER_MSEC)
+#define PLAYBACK_BUFFER_IN_USEC        (PLAYBACK_PERIOD_NUM*PLAYBACK_PERIOD_IN_USEC)
+#define PLAYBACK_LATENCY_PERIOD_NUM    (4)  /* 4*120 = 480ms*/
+#define PLAYBACK_LATENCY_SAMPLE_NUM    (PLAYBACK_LATENCY_PERIOD_NUM*PLAYBACK_SAMPLE_NUM_PER_PERIOD)
+#define PLAYBACK_LATENCY_IN_USEC       (PLAYBACK_LATENCY_PERIOD_NUM*PLAYBACK_PCM_FRAME_PER_PERIOD*PLAYBACK_MSEC_PER_FRAME*USEC_PER_MSEC)
+#define PLAYBACK_LATENCY_BUF_SIZE      (PLAYBACK_LATENCY_PERIOD_NUM*PLAYBACK_PCM_FRAME_PER_PERIOD*PLAYBACK_PCM_FRAME_BUF_SIZE)
+
+#define MIN_SAMPLE_NUM_TO_DECODE  (120*PLAYBACK_SAMPLE_RATE/1000)     /* to decode opus: maximum packet duration (120ms; 5760 for 48kHz) */
+#define MIN_BUFFER_SIZE_TO_DECODE (MIN_SAMPLE_NUM_TO_DECODE*PLAYBACK_CHANNEL_NUM*PLAYBACK_SAMPLE_SIZE)
+
+
+/* Record */
 #define RECORD_SAMPLE_RATE           (8000)
 #define RECORD_CHANNEL_NUM           (1)
 #define RECORD_MSEC_PER_FRAME        (60)
+#define RECORD_SAMPLE_SIZE           sizeof(opus_int16)
+#define RECORD_PCM_BUF_SIZE_PER_SEC  (RECORD_SAMPLE_RATE*RECORD_CHANNEL_NUM*RECORD_SAMPLE_SIZE)
 #define RECORD_TIMESTAMP_SAMPLE_NUM  (RECORD_MSEC_PER_FRAME*48000/MSEC_PER_SEC)    /* 60 ms/frame */
 #define RECORD_FRAME_SAMPLE_NUM      (RECORD_MSEC_PER_FRAME*RECORD_SAMPLE_RATE/MSEC_PER_SEC)    /* 60 ms/frame */
-#define RECORD_PCM_FRAME_BUF_SIZE    (RECORD_FRAME_SAMPLE_NUM*RECORD_CHANNEL_NUM*sizeof(opus_int16))
+#define RECORD_PCM_FRAME_BUF_SIZE    (RECORD_FRAME_SAMPLE_NUM*RECORD_CHANNEL_NUM*RECORD_SAMPLE_SIZE)
+#define RECORD_PCM_FRAME_PER_PERIOD  (2) /* 2 * 60 = 120 ms*/
+#define RECORD_SAMPLE_NUM_PER_PERIOD (RECORD_PCM_FRAME_PER_PERIOD*RECORD_FRAME_SAMPLE_NUM)
+#define RECORD_PERIOD_NUM            (8) /* max: 17? */
+#define RECORD_PERIOD_IN_USEC        (RECORD_PCM_FRAME_PER_PERIOD*RECORD_MSEC_PER_FRAME*USEC_PER_MSEC)
+#define RECORD_BUFFER_IN_USEC        (RECORD_PERIOD_NUM*RECORD_PERIOD_IN_USEC)
+#define RECORD_LATENCY_PERIOD_NUM    (2)  /* 2*120 = 240ms*/
+#define RECORD_LATENCY_SAMPLE_NUM    (RECORD_LATENCY_PERIOD_NUM*RECORD_SAMPLE_NUM_PER_PERIOD)
+#define RECORD_LATENCY_IN_USEC       (RECORD_LATENCY_PERIOD_NUM*RECORD_PCM_FRAME_PER_PERIOD*RECORD_MSEC_PER_FRAME*USEC_PER_MSEC)
+#define RECORD_LATENCY_PCM_BUF_SIZE  (RECORD_LATENCY_PERIOD_NUM*RECORD_PCM_FRAME_PER_PERIOD*RECORD_PCM_FRAME_BUF_SIZE)
 #define RECORD_OPUS_FRAME_BUF_SIZE   (1000)
-#define RECORD_PCM_BUF_SIZE_PER_SEC  (RECORD_SAMPLE_RATE*RECORD_CHANNEL_NUM*sizeof(opus_int16))
-#define RECORD_LATENCY_IN_USEC       (200000)  /* 200 ms */
-#define RECORD_LATENCY_PCM_BUF_SIZE  (RECORD_PCM_BUF_SIZE_PER_SEC * ((double)RECORD_LATENCY_IN_USEC/USEC_PER_SEC))
 
 /* Plugin methods */
 janus_plugin *create(void);
@@ -207,6 +225,7 @@ struct janus_plugin_result *janus_safievoice_handle_message(janus_plugin_session
 void janus_safievoice_setup_media(janus_plugin_session *handle);
 void janus_safievoice_incoming_rtp(janus_plugin_session *handle, int video, char *buf, int len);
 void janus_safievoice_incoming_rtcp(janus_plugin_session *handle, int video, char *buf, int len);
+void janus_safievoice_slow_link(janus_plugin_session *handle, int uplink, int video);
 void janus_safievoice_hangup_media(janus_plugin_session *handle);
 void janus_safievoice_destroy_session(janus_plugin_session *handle, int *error);
 json_t *janus_safievoice_query_session(janus_plugin_session *handle);
@@ -230,6 +249,7 @@ static janus_plugin janus_safievoice_plugin =
 		.setup_media = janus_safievoice_setup_media,
 		.incoming_rtp = janus_safievoice_incoming_rtp,
 		.incoming_rtcp = janus_safievoice_incoming_rtcp,
+		.slow_link = janus_safievoice_slow_link,
 		.hangup_media = janus_safievoice_hangup_media,
 		.destroy_session = janus_safievoice_destroy_session,
 		.query_session = janus_safievoice_query_session,
@@ -270,12 +290,26 @@ typedef struct janus_safievoice_session {
 	int opus_pt;
 	int record_seq;
 	gint64 record_start_time;
-    gint64 first_rtp_time;
-    gint64 last_rtp_time;
-    gint64 total_rtp_cnt;
-    gint64 skiped_rtp_cnt;
-    gint64 timeover_incoming_rtp_cnt;
-	gint64 cur_latency;
+
+    gint64 first_in_rtp_time;
+    gint64 last_in_rtp_time;
+    gint64 total_in_rtp_cnt;
+	gint64 total_in_rtp_size;
+    gint64 skiped_in_rtp_cnt;
+    gint64 overlatency_in_rtp_cnt;
+	gint64 cur_in_latency;
+
+    gint64 first_out_rtp_time;
+    gint64 last_out_rtp_time;
+    gint64 total_out_rtp_cnt;
+    gint64 total_out_rtp_size;
+    gint64 skiped_out_rtp_cnt;
+    gint64 overlatency_out_rtp_cnt;
+	gint64 cur_out_latency;
+
+	uint32_t bitrate;
+	guint16 slowlink_count;
+
 	int seq;
 	gboolean started;
 	gboolean stopping;
@@ -735,12 +769,24 @@ void janus_safievoice_create_session(janus_plugin_session *handle, int *error) {
 	session->pcm_filename = g_strdup(pcm_f);
 	session->pcm_fd = -1;
 #endif
-	session->first_rtp_time = 0;
-	session->last_rtp_time = 0;
-    session->total_rtp_cnt = 0;
-    session->skiped_rtp_cnt = 0;
-    session->timeover_incoming_rtp_cnt = 0;
-	session->cur_latency = 0;
+	session->first_in_rtp_time = 0;
+	session->last_in_rtp_time = 0;
+    session->total_in_rtp_cnt = 0;
+	session->total_in_rtp_size = 0;
+    session->skiped_in_rtp_cnt = 0;
+    session->overlatency_in_rtp_cnt = 0;
+	session->cur_in_latency = 0;
+
+	session->first_out_rtp_time = 0;
+	session->last_out_rtp_time = 0;
+    session->total_out_rtp_cnt = 0;
+    session->total_out_rtp_size = 0;
+    session->skiped_out_rtp_cnt = 0;
+    session->overlatency_out_rtp_cnt = 0;
+	session->cur_out_latency = 0;
+
+	session->slowlink_count = 0;
+
 	g_async_queue_push(player_request_queue, &player_open_message);
 
     /* wait for response from player */
@@ -795,7 +841,7 @@ void janus_safievoice_destroy_session(janus_plugin_session *handle, int *error) 
 		JANUS_LOG(LOG_ERR, "Can not close player...0x%p\n", msg);
     }
 
-	if (session->first_rtp_time != 0) {
+	if (session->first_in_rtp_time != 0) {
 		g_async_queue_push(recorder_request_queue, &recorder_close_message);
 	}
 
@@ -903,19 +949,39 @@ struct janus_plugin_result *janus_safievoice_handle_message(janus_plugin_session
 		json_object_set_new(event, "stopping", session->stopping ? json_true() : json_false());
 		json_object_set_new(event, "hangingup", json_integer(g_atomic_int_get(&session->hangingup)));
 		json_object_set_new(event, "destroyed", json_integer(g_atomic_int_get(&session->destroyed)));
-		json_object_set_new(event, "total_rtp_cnt", json_integer(session->total_rtp_cnt));
-		json_object_set_new(event, "skiped_rtp_cnt", json_integer(session->skiped_rtp_cnt));
-		json_object_set_new(event, "timeover_incoming_rtp_cnt", json_integer(session->timeover_incoming_rtp_cnt));
-		json_object_set_new(event, "cur_latency", json_integer(session->cur_latency));
-		if (session->first_rtp_time == 0) {
-			json_object_set_new(event, "rtp_started", json_false());
-			json_object_set_new(event, "time_from_first_rtp", json_integer(0));
-			json_object_set_new(event, "time_from_last_rtp", json_integer(0));
+
+		/* info of download rtp */
+		json_t *download = json_object();
+		json_object_set_new(download, "total_rtp_cnt", json_integer(session->total_in_rtp_cnt));
+		json_object_set_new(download, "total_rtp_size", json_integer(session->total_in_rtp_size));
+		json_object_set_new(download, "skiped_rtp_cnt", json_integer(session->skiped_in_rtp_cnt));
+		json_object_set_new(download, "overlatency_rtp_cnt", json_integer(session->overlatency_in_rtp_cnt));
+		json_object_set_new(download, "cur_latency", json_integer(session->cur_in_latency));
+		if (session->first_in_rtp_time == 0) {
+			json_object_set_new(download, "time_from_first", json_integer(0));
+			json_object_set_new(download, "time_from_last", json_integer(0));
 		} else {
-			json_object_set_new(event, "rtp_started", json_true());
-			json_object_set_new(event, "time_from_first_rtp", json_integer(now - session->first_rtp_time));
-			json_object_set_new(event, "time_from_last_rtp", json_integer(now - session->last_rtp_time));
+			json_object_set_new(download, "time_from_first", json_integer(now - session->first_in_rtp_time));
+			json_object_set_new(download, "time_from_last", json_integer(now - session->last_in_rtp_time));
 		}
+		json_object_set_new(event, "download", download);
+
+		/* info of out rtp */
+		json_t *upload = json_object();
+		json_object_set_new(upload, "total_rtp_cnt", json_integer(session->total_out_rtp_cnt));
+		json_object_set_new(upload, "total_rtp_size", json_integer(session->total_out_rtp_size));
+		json_object_set_new(upload, "skiped_rtp_cnt", json_integer(session->skiped_out_rtp_cnt));
+		json_object_set_new(upload, "overlatency_rtp_cnt", json_integer(session->overlatency_out_rtp_cnt));
+		json_object_set_new(upload, "cur_latency", json_integer(session->cur_out_latency));
+		if (session->first_out_rtp_time == 0) {
+			json_object_set_new(upload, "time_from_first", json_integer(0));
+			json_object_set_new(upload, "time_from_last", json_integer(0));
+		} else {
+			json_object_set_new(upload, "time_from_first", json_integer(now - session->first_out_rtp_time));
+			json_object_set_new(upload, "time_from_last", json_integer(now - session->last_out_rtp_time));
+		}
+		json_object_set_new(event, "upload", upload);
+
 		return janus_plugin_result_new(JANUS_PLUGIN_OK, NULL, event);
 	}
 #endif
@@ -970,10 +1036,10 @@ void janus_safievoice_incoming_rtp(janus_plugin_session *handle, int video, char
 		return;
 
     gint64 rtp_time = janus_get_monotonic_time();
-	session->last_rtp_time = rtp_time;
-    if (session->first_rtp_time == 0) {
-        session->first_rtp_time = rtp_time;
-        long int setup_time = (session->first_rtp_time - session->start_time);
+	session->last_in_rtp_time = rtp_time;
+    if (session->first_in_rtp_time == 0) {
+        session->first_in_rtp_time = rtp_time;
+        long int setup_time = (session->first_in_rtp_time - session->start_time);
         JANUS_LOG(LOG_WARN, "time[Media setup -> 1st rtp received] = %ld us\n", setup_time);
 		g_async_queue_push(recorder_request_queue, &recorder_open_message);
     }
@@ -984,53 +1050,40 @@ void janus_safievoice_incoming_rtp(janus_plugin_session *handle, int video, char
 	if(session->seq == 0)
 		session->seq = seq;
 
-    session->total_rtp_cnt ++;
+    session->total_in_rtp_cnt ++;
+	session->total_in_rtp_size += len;
 
     gint buffering_frames_num = g_async_queue_length(player_request_queue);
     buffering_frames_num = buffering_frames_num < 0 ? 0 : buffering_frames_num;
-    long int buffering_latency = buffering_frames_num * USEC_PER_FRAME;
+    long int buffering_latency = buffering_frames_num * PLAYBACK_USEC_PER_FRAME;
 
     uint32_t hl_timestamp = ntohl(rtp->timestamp);
-    long int expect_time = session->first_rtp_time + ((hl_timestamp / FRAME_SAMPLE_NUM) * USEC_PER_FRAME);
+    long int expect_time = session->first_in_rtp_time + ((hl_timestamp / PLAYBACK_FRAME_SAMPLE_NUM) * PLAYBACK_USEC_PER_FRAME);
     long int incoming_latency = rtp_time - expect_time;
 
     long int total_latency = buffering_latency + incoming_latency + PLAYBACK_LATENCY_IN_USEC;
-	session->cur_latency = total_latency;
+	session->cur_in_latency = total_latency;
     if (total_latency > LATENCY_CONTROL_START_THRESHOLD) {
-        session->timeover_incoming_rtp_cnt ++;
+        session->overlatency_in_rtp_cnt ++;
         int latency_level = GET_LATENCY_LEVEL(total_latency);
         int skip_num = skip_params[latency_level].skip_num;
         int skip_base = skip_params[latency_level].skip_base;
-        if ((session->timeover_incoming_rtp_cnt % skip_base) < skip_num) {
-            session->skiped_rtp_cnt ++;
+        if ((session->overlatency_in_rtp_cnt % skip_base) < skip_num ||
+		 	total_latency > LATENCY_CONTROL_EMERGENCY_THRESHOLD) {
+            session->skiped_in_rtp_cnt ++;
 
-            /* skip decoded PCM buffer */
-            janus_safievoice_player_request_message *msg = NULL;
-            int clean_buffer_cnt = 0;
-            int clean_buffer_num = skip_params[latency_level].clean_buffer_bum;
-            while((total_latency > LATENCY_CONTROL_EMERGENCY_THRESHOLD) ||
-                  (clean_buffer_cnt < clean_buffer_num)) {
-                msg = g_async_queue_try_pop(player_request_queue);
-                if (msg == NULL)
-                    break;
-
-                janus_safievoice_player_request_message_free(msg);
-                clean_buffer_cnt ++;
-            }
-
-            JANUS_LOG(LOG_ERR, "Skip total timeover rtp->{seq=%d, skiped:total:to=%ld:%ld:%ld} as latency(%ld:%ld:%ld) > %d ms, skip(lvl%d) rate=%d/%d, cleaned buf=%d\n",
+            JANUS_LOG(LOG_ERR, "Skip total timeover rtp->{seq=%d, skiped:total:to=%ld:%ld:%ld} as latency(%ld:%ld:%ld) > %d ms, skip(lvl%d) rate=%d/%d\n",
                       seq,
-                      (long int)session->skiped_rtp_cnt,
-                      (long int)session->total_rtp_cnt,
-                      (long int)session->timeover_incoming_rtp_cnt,
+                      (long int)session->skiped_in_rtp_cnt,
+                      (long int)session->total_in_rtp_cnt,
+                      (long int)session->overlatency_in_rtp_cnt,
                       total_latency,
                       incoming_latency,
                       buffering_latency,
                       LATENCY_CONTROL_START_THRESHOLD/1000,
                       latency_level,
                       skip_num,
-                      skip_base,
-                      clean_buffer_num
+                      skip_base
                 );
 
             return;
@@ -1080,7 +1133,7 @@ void janus_safievoice_incoming_rtp(janus_plugin_session *handle, int video, char
 
 	if (sample_num > 0 && session->pcm_fd != -1) {
 		/* write pcm */
-		size_t ws = sizeof(opus_int16) * CHANNELS * (size_t)sample_num;
+		size_t ws = PLAYBACK_SAMPLE_SIZE * PLAYBACK_CHANNEL_NUM * (size_t)sample_num;
 		const char* buf = (const char*)pcm;
 		while (ws > 0) {
 			ssize_t n = write(session->pcm_fd, buf, ws);
@@ -1098,7 +1151,25 @@ void janus_safievoice_incoming_rtp(janus_plugin_session *handle, int video, char
 void janus_safievoice_incoming_rtcp(janus_plugin_session *handle, int video, char *buf, int len) {
 	if(handle == NULL || g_atomic_int_get(&handle->stopped) || g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized))
 		return;
+	guint32 bitrate = janus_rtcp_get_remb(buf, len);
+	///JANUS_LOG(LOG_WARN, "bitrate=%lu for %s\n",	bitrate, video ? "video" : "audio");
 	/* FIXME Should we care? */
+}
+
+void janus_safievoice_slow_link(janus_plugin_session *handle, int uplink, int video) {
+	/* The core is informing us that our peer got or sent too many NACKs, are we pushing media too hard? */
+	if(handle == NULL || g_atomic_int_get(&handle->stopped) || g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized))
+		return;
+	janus_safievoice_session *session = (janus_safievoice_session *)handle->plugin_handle;
+	if(!session) {
+		JANUS_LOG(LOG_ERR, "No session associated with this handle...\n");
+		return;
+	}
+	if(g_atomic_int_get(&session->destroyed))
+		return;
+	session->slowlink_count++;
+	JANUS_LOG(LOG_WARN, "slowlink_count=%d, Getting a lot of NACKs (slow %s) for %s\n",
+			session->slowlink_count, uplink ? "uplink" : "downlink", video ? "video" : "audio");
 }
 
 void janus_safievoice_hangup_media(janus_plugin_session *handle) {
@@ -1192,7 +1263,7 @@ static void *janus_safievoice_handler(void *data) {
 
 			if (session->decoder == NULL) {
 				int err = 0;
-				session->decoder = opus_decoder_create(SAMPLE_RATE, CHANNELS, &err);
+				session->decoder = opus_decoder_create(PLAYBACK_SAMPLE_RATE, PLAYBACK_CHANNEL_NUM, &err);
 				if (err < 0) {
 					g_snprintf(error_cause, 512, "Failed to create decoder (%s)\n", opus_strerror(err));
 					error_code = JANUS_SAFIEVOICE_ERROR_IO_ERROR;
@@ -1364,16 +1435,39 @@ error:
 static snd_pcm_t* pcm_alsa_open(snd_pcm_stream_t stream);
 static int pcm_alsa_playback(snd_pcm_t *pcm_handler, opus_int16* pcm_buf, uint32_t sample_num);
 static void pcm_alsa_close(snd_pcm_t *pcm_handler);
+const char* stream_type_str(snd_pcm_stream_t stream) 
+{
+	static const char* stream_types[] = {
+		[SND_PCM_STREAM_PLAYBACK] = "playback",
+		[SND_PCM_STREAM_CAPTURE] = "capture"
+	};
+	return stream_types[stream];
+}
+
+
+static void printBufferParam(snd_pcm_stream_t stream, const char* mark, snd_pcm_t *pcm_handler, snd_pcm_hw_params_t* hw_params)
+{
+	unsigned int period_min;
+	unsigned int period_max;
+	snd_pcm_uframes_t buf_min;
+	snd_pcm_uframes_t buf_max;
+	snd_pcm_hw_params_get_periods_min(hw_params, &period_min, 0);
+	snd_pcm_hw_params_get_periods_max(hw_params, &period_max, 0);
+	snd_pcm_hw_params_get_buffer_size_min(hw_params, &buf_min);
+	snd_pcm_hw_params_get_buffer_size_max(hw_params, &buf_max);
+	JANUS_LOG(LOG_ERR, "[%s] after %s, periods range=%u-%u, bufsz range=%lu-%lu\n", 
+		stream_type_str(stream), mark,  period_min, period_max, buf_min, buf_max);
+}
 
 static snd_pcm_t* pcm_alsa_open(snd_pcm_stream_t stream)
 {
     static gboolean is_retrying[SND_PCM_STREAM_LAST] = {FALSE, FALSE};
-    unsigned int err;
+    int err;
     snd_pcm_t *pcm_handler = NULL;
 
 	/* Open the PCM device in playback mode */
 	err = snd_pcm_open(&pcm_handler, "default", stream, 
-#if 0
+#if 1
 						0 /* block */
 #else
 						SND_PCM_NONBLOCK
@@ -1381,8 +1475,8 @@ static snd_pcm_t* pcm_alsa_open(snd_pcm_stream_t stream)
 						);
     if (err != 0) {
         if (!is_retrying[stream]) {
-            JANUS_LOG(LOG_ERR, "ERROR: Can't open PCM device[%d]. %s\n",
-                      stream, snd_strerror(err));
+            JANUS_LOG(LOG_ERR, "ERROR: Can't open PCM device[%s]. %s\n",
+                      stream_type_str(stream), snd_strerror(err));
             is_retrying[stream] = TRUE;
         }
         pcm_alsa_close(pcm_handler);
@@ -1390,16 +1484,185 @@ static snd_pcm_t* pcm_alsa_open(snd_pcm_stream_t stream)
     }
 
     /* set parameters */
-	unsigned int ch = (stream == SND_PCM_STREAM_CAPTURE) ?  RECORD_CHANNEL_NUM : CHANNELS;
-	unsigned int sample_rate = (stream == SND_PCM_STREAM_CAPTURE) ? RECORD_SAMPLE_RATE : SAMPLE_RATE;
-	unsigned int latency = (stream == SND_PCM_STREAM_CAPTURE) ? RECORD_LATENCY_IN_USEC : PLAYBACK_LATENCY_IN_USEC;
+	unsigned int ch                      = (stream == SND_PCM_STREAM_CAPTURE) ? RECORD_CHANNEL_NUM : PLAYBACK_CHANNEL_NUM;
+	unsigned int sample_rate             = (stream == SND_PCM_STREAM_CAPTURE) ? RECORD_SAMPLE_RATE : PLAYBACK_SAMPLE_RATE;
+	unsigned int exact_sample_rate       = sample_rate;
+	unsigned int latency                 = (stream == SND_PCM_STREAM_CAPTURE) ? RECORD_LATENCY_IN_USEC : PLAYBACK_LATENCY_IN_USEC;
+	snd_pcm_uframes_t latency_sample_num = (stream == SND_PCM_STREAM_CAPTURE) ? RECORD_LATENCY_SAMPLE_NUM : PLAYBACK_LATENCY_SAMPLE_NUM;
+  	snd_pcm_uframes_t period_sample_num  = (stream == SND_PCM_STREAM_CAPTURE) ? RECORD_SAMPLE_NUM_PER_PERIOD : PLAYBACK_SAMPLE_NUM_PER_PERIOD;
+	unsigned int period_time             = (stream == SND_PCM_STREAM_CAPTURE) ? RECORD_PERIOD_IN_USEC : PLAYBACK_PERIOD_IN_USEC;
+	unsigned int exact_period_time       = period_time;
+	unsigned int buffer_time             = (stream == SND_PCM_STREAM_CAPTURE) ? RECORD_BUFFER_IN_USEC : PLAYBACK_BUFFER_IN_USEC;
+	unsigned int exact_buffer_time       = buffer_time;
+	unsigned int period_num              = (stream == SND_PCM_STREAM_CAPTURE) ? RECORD_PERIOD_NUM : PLAYBACK_PERIOD_NUM;;  /* periods 遅延を防ぐための区間の数 */
+#if 0
     err = snd_pcm_set_params(pcm_handler,
                              SND_PCM_FORMAT_S16_LE,
                              SND_PCM_ACCESS_RW_INTERLEAVED,
                              ch, sample_rate, 1, latency);
+#else
+	snd_pcm_hw_params_t* hw_params;
+	err = snd_pcm_hw_params_malloc(&hw_params);
+    if (err != 0) {
+        JANUS_LOG(LOG_ERR, "[%s] err. %s\n", stream_type_str(stream), snd_strerror(err));
+		goto end;
+    }
+	err = snd_pcm_hw_params_any(pcm_handler, hw_params);
+    if (err != 0) {
+        JANUS_LOG(LOG_ERR, "[%s] err. %s\n", stream_type_str(stream), snd_strerror(err));
+		goto end;
+    }
+
+	printBufferParam(stream, "init", pcm_handler, hw_params);
+
+
+	err = snd_pcm_hw_params_set_access(pcm_handler, hw_params, SND_PCM_ACCESS_RW_INTERLEAVED);
+    if (err != 0) {
+        JANUS_LOG(LOG_ERR, "[%s] err. %s\n", stream_type_str(stream), snd_strerror(err));
+		goto end;
+    }
+	printBufferParam(stream, "access", pcm_handler, hw_params);
+
+	err = snd_pcm_hw_params_set_format(pcm_handler, hw_params, SND_PCM_FORMAT_S16_LE);
+    if (err != 0) {
+        JANUS_LOG(LOG_ERR, "[%s] err. %s\n", stream_type_str(stream), snd_strerror(err));
+		goto end;
+    }
+	printBufferParam(stream, "format", pcm_handler, hw_params);
+
+    JANUS_LOG(LOG_ERR, "[%s] before sample_rate=%u, exact_sample_rate=%u.\n",
+			stream_type_str(stream), sample_rate, exact_sample_rate);
+	err = snd_pcm_hw_params_set_rate_near(pcm_handler, hw_params, &exact_sample_rate, 0);
+    if (err != 0) {
+        JANUS_LOG(LOG_ERR, "[%s] err. %s\n", stream_type_str(stream), snd_strerror(err));
+		goto end;
+    }
+    JANUS_LOG(LOG_ERR, "[%s] after sample_rate=%u, exact_sample_rate=%u.\n",
+			stream_type_str(stream), sample_rate, exact_sample_rate);
+	printBufferParam(stream, "rate", pcm_handler, hw_params);
+
+	err = snd_pcm_hw_params_set_channels(pcm_handler, hw_params, ch);
+    if (err != 0) {
+        JANUS_LOG(LOG_ERR, "[%s] err. %s\n", stream_type_str(stream), snd_strerror(err));
+		goto end;
+    }
+	printBufferParam(stream, "ch", pcm_handler, hw_params);
+
+
+#if 0
+	err = snd_pcm_hw_params_set_periods(pcm_handler, hw_params, period_num, 0);
+    if (err != 0) {
+		unsigned int period_min;
+		unsigned int period_max;
+		snd_pcm_hw_params_get_periods_min(hw_params, &period_min, 0);
+		snd_pcm_hw_params_get_periods_max(hw_params, &period_max, 0);
+        JANUS_LOG(LOG_ERR, "[%s] err. %s. %u should be in range %u-%u\n",
+			stream_type_str(stream), snd_strerror(err), period_num, period_min, period_max);
+		goto end;
+    }
+	printBufferParam(stream, "period", pcm_handler, hw_params);
+#endif
+#if 0
+	err = snd_pcm_hw_params_set_period_size(pcm_handler, hw_params, period_sample_num, 0);
+    if (err != 0) {
+		snd_pcm_uframes_t period_sample_num_min;
+		snd_pcm_uframes_t period_sample_num_max;
+		snd_pcm_hw_params_set_period_size_min(pcm_handler, hw_params, &period_sample_num_min, 0);
+		snd_pcm_hw_params_set_period_size_max(pcm_handler, hw_params, &period_sample_num_max, 0);
+        JANUS_LOG(LOG_ERR, "[%s] err. %s. %lu should be in range %lu-%lu\n",
+			stream_type_str(stream), snd_strerror(err), period_sample_num, period_sample_num_min, period_sample_num_max);
+		goto end;
+    }
+
+	printBufferParam(stream, "period_size", pcm_handler, hw_params);
+#endif
+#if 0
+    JANUS_LOG(LOG_ERR, "[%s] before buffer_time=%u, exact_buffer_time=%u.\n",
+			stream_type_str(stream), buffer_time, exact_buffer_time);
+	err = snd_pcm_hw_params_set_buffer_time_near(pcm_handler, hw_params, &exact_buffer_time, 0);
+    if (err != 0) {
+        JANUS_LOG(LOG_ERR, "[%s] err. %s.\n",
+			stream_type_str(stream), snd_strerror(err));
+		goto end;
+    }
+    JANUS_LOG(LOG_ERR, "[%s] after buffer_time=%u, exact_buffer_time=%u.\n",
+			stream_type_str(stream), buffer_time, exact_buffer_time);
+	printBufferParam(stream, "buffer_time", pcm_handler, hw_params);
+#endif
+#if 0
+	snd_pcm_uframes_t buffer_size = period_num * period_sample_num;
+	snd_pcm_uframes_t exact_buffer_size = buffer_size;
+    JANUS_LOG(LOG_ERR, "[%s] before buffer_size=%u, exact_buffer_size=%u.\n",
+			stream_type_str(stream), buffer_size, exact_buffer_size);
+	err = snd_pcm_hw_params_set_buffer_size_near(pcm_handler, hw_params, &exact_buffer_size);
+    if (err != 0) {
+		snd_pcm_uframes_t buf_min;
+		snd_pcm_uframes_t buf_max;
+		snd_pcm_hw_params_get_buffer_size_min(hw_params, &buf_min);
+		snd_pcm_hw_params_get_buffer_size_max(hw_params, &buf_max);
+        JANUS_LOG(LOG_ERR, "[%s] err. %s. %lu should be in range %lu-%lu\n",
+			stream_type_str(stream), snd_strerror(err), buffer_size, buf_min, buf_max);
+		goto end;
+    }
+    JANUS_LOG(LOG_ERR, "[%s] after buffer_size=%u, exact_buffer_size=%u.\n",
+			stream_type_str(stream), buffer_size, exact_buffer_size);
+	printBufferParam(stream, "bufsz", pcm_handler, hw_params);
+#endif
+#if 0
+    JANUS_LOG(LOG_ERR, "[%s] before period_time=%u, exact_period_time=%u.\n",
+			stream_type_str(stream), period_time, exact_period_time);
+	err = snd_pcm_hw_params_set_period_time_near(pcm_handler, hw_params, &exact_period_time, 0);
+    if (err != 0) {
+        JANUS_LOG(LOG_ERR, "[%s] err. %s.\n",
+			stream_type_str(stream), snd_strerror(err));
+		goto end;
+    }
+	printBufferParam(stream, "period_time", pcm_handler, hw_params);
+#endif
+
+	err = snd_pcm_hw_params(pcm_handler, hw_params);
+    if (err != 0) {
+        JANUS_LOG(LOG_ERR, "[%s] err. %s\n", stream_type_str(stream), snd_strerror(err));
+		goto end;
+    }
+
+	snd_pcm_prepare(pcm_handler);
+	snd_pcm_hw_params_current(pcm_handler, hw_params);
+
+	snd_pcm_uframes_t exact_period_sample_num;
+	snd_pcm_hw_params_get_period_size(hw_params, &exact_period_sample_num, 0);
+    JANUS_LOG(LOG_ERR, "[%s] after  exact_period_sample_num=%lu\n",
+			stream_type_str(stream), exact_period_sample_num);
+
+	snd_pcm_uframes_t exact_buffer_sample_num;
+	snd_pcm_hw_params_get_buffer_size(hw_params, &exact_buffer_sample_num);
+    JANUS_LOG(LOG_ERR, "[%s] after  exact_buffer_sample_num=%lu\n",
+			stream_type_str(stream), exact_buffer_sample_num);
+
+	snd_pcm_hw_params_free(hw_params);
+
+	snd_pcm_sw_params_t* sw_params;
+	snd_pcm_sw_params_alloca(&sw_params);
+	err = snd_pcm_sw_params_current(pcm_handler, sw_params);
+    if (err != 0) {
+        JANUS_LOG(LOG_ERR, "[%s] err. %s\n", stream_type_str(stream), snd_strerror(err));
+		goto end;
+    }
+	err = snd_pcm_sw_params_set_start_threshold(pcm_handler, sw_params, exact_buffer_sample_num / 2);
+    if (err != 0) {
+        JANUS_LOG(LOG_ERR, "[%s] err. %s\n", stream_type_str(stream), snd_strerror(err));
+		goto end;
+    }
+	err = snd_pcm_sw_params(pcm_handler, sw_params);
+    if (err != 0) {
+        JANUS_LOG(LOG_ERR, "[%s] err. %s\n", stream_type_str(stream), snd_strerror(err));
+		goto end;
+    }
+#endif
+
+end:
     if (err != 0) {
         if (!is_retrying[stream]) {
-            JANUS_LOG(LOG_ERR, "PCM device[%d] open error: %s\n", stream, snd_strerror(err));
             is_retrying[stream] = TRUE;
         }
         pcm_alsa_close(pcm_handler);
@@ -1421,7 +1684,6 @@ static int pcm_alsa_io(snd_pcm_t *pcm_handler, opus_int16* pcm_buf, uint32_t sam
     }
 
 	snd_pcm_stream_t stream = snd_pcm_stream(pcm_handler);
-	const char* stream_type = ((stream == SND_PCM_STREAM_CAPTURE) ? "capture" : "play");
     int remain_size = sample_num;
     uint32_t retry_cnt = 0;
     while (remain_size > 0) {
@@ -1429,54 +1691,63 @@ static int pcm_alsa_io(snd_pcm_t *pcm_handler, opus_int16* pcm_buf, uint32_t sam
 			uint32_t offset = (sample_num - remain_size) * RECORD_CHANNEL_NUM;
         	pcm_ret = snd_pcm_readi(pcm_handler, pcm_buf + offset, remain_size);
 		} else {
-			uint32_t offset = (sample_num - remain_size) * CHANNELS;
+			uint32_t offset = (sample_num - remain_size) * PLAYBACK_CHANNEL_NUM;
 			pcm_ret = snd_pcm_writei(pcm_handler, pcm_buf + offset, remain_size);
 		}
         if (pcm_ret == -EAGAIN) {
 			// todo: improve performance
             if (retry_cnt > 20000) {
                 JANUS_LOG(LOG_ERR, "[%s]failed, retry cnt=%d. progress=%d/%d\n", 
-					stream_type, retry_cnt, sample_num - remain_size, sample_num);
+					stream_type_str(stream), retry_cnt, sample_num - remain_size, sample_num);
                 return pcm_ret;
             }
             retry_cnt++;
         } else if (pcm_ret == -EPIPE) {
-            JANUS_LOG(LOG_WARN, "[%s] overrun. progress=%d/%d\n", 
-				stream_type, sample_num - remain_size, sample_num);
+#if 0
+			snd_pcm_uframes_t buffer_size;
+			snd_pcm_uframes_t period_size;
+			snd_pcm_get_params(pcm_handler, &buffer_size, &period_size);
+			snd_pcm_sframes_t delay;
+			int ret = snd_pcm_delay(pcm_handler, &delay);
+            JANUS_LOG(LOG_WARN, "[%s] overrun. progress=%d/%d, avail=%ld, ret=%d(%s), delay=%ld, bufsz=%lu, period=%lu\n", 
+				stream_type_str(stream), sample_num - remain_size, sample_num,
+				snd_pcm_avail_update(pcm_handler),
+				ret, snd_strerror(ret), delay, buffer_size, period_size);
+#endif
 			int err;
             if ((err = snd_pcm_recover(pcm_handler, pcm_ret, 0)) < 0) {
     			JANUS_LOG(LOG_WARN, "[%s] recover failed: %s\n", 
-					stream_type, snd_strerror(err));
+					stream_type_str(stream), snd_strerror(err));
                 return err;
             }
         } else if (pcm_ret == -EBADFD) {
             JANUS_LOG(LOG_ERR, "[%s] PCM is not in the right state. progress=%d/%d\n", 
-				stream_type, sample_num - remain_size, sample_num);
+				stream_type_str(stream), sample_num - remain_size, sample_num);
 			return pcm_ret;
 		} else if (pcm_ret == -ESTRPIPE) {
             JANUS_LOG(LOG_ERR, "[%s]a suspend event occurred . progress=%d/%d\n",
-				stream_type, sample_num - remain_size, sample_num);
+				stream_type_str(stream), sample_num - remain_size, sample_num);
 			int err;
         	while ((err = snd_pcm_resume(pcm_handler)) == -EAGAIN) {
 				JANUS_LOG(LOG_ERR, "[%s]waitng for resume . progress=%d/%d\n",
-					stream_type, sample_num - remain_size, sample_num);
+					stream_type_str(stream), sample_num - remain_size, sample_num);
             	sleep(1);   /* wait until the suspend flag is released */
 			}
         	if (err < 0) {
             	if ((err = snd_pcm_prepare(pcm_handler)) < 0) {
 	                JANUS_LOG(LOG_ERR, "[%s]Can't recovery from suspend, prepare failed: %s\n", 
-						stream_type, snd_strerror(err));
+						stream_type_str(stream), snd_strerror(err));
 					return err;
 				}
 			}
 		} else if (pcm_ret < 0) {
             JANUS_LOG(LOG_ERR, "[%s]ERROR. progress=%d/%d, pcm_ret=%d, %s\n",
-						stream_type, sample_num - remain_size, sample_num,
+						stream_type_str(stream), sample_num - remain_size, sample_num,
                       	pcm_ret, snd_strerror(pcm_ret));
             return pcm_ret;
         } else if (pcm_ret > remain_size) {
             JANUS_LOG(LOG_ERR, "[%s]ERROR? progress=%d/%d, pcm_ret=%d\n",
-						stream_type,
+						stream_type_str(stream),
 					  	sample_num - remain_size, sample_num, pcm_ret);
             return pcm_ret;
         } else {
@@ -1499,7 +1770,7 @@ static int pcm_alsa_playback(snd_pcm_t *pcm_handler, opus_int16* pcm_buf, uint32
     int write_size = sample_num;
     uint32_t retry_cnt = 0;
     while (write_size > 0) {
-        uint32_t offset = (sample_num - write_size) * CHANNELS;
+        uint32_t offset = (sample_num - write_size) * PLAYBACK_CHANNEL_NUM;
         pcm_ret = snd_pcm_writei(pcm_handler, pcm_buf + offset, write_size);
         if (pcm_ret == -EAGAIN) {
             if (retry_cnt > 10000) {
@@ -1548,13 +1819,13 @@ static pa_simple* pcm_pulse_open(const char* name, pa_stream_direction_t dir, co
 {
 	static const pa_sample_spec ss = {
 		.format   = PA_SAMPLE_S16LE,
-		.rate     = SAMPLE_RATE,
-		.channels = CHANNELS
+		.rate     = PLAYBACK_SAMPLE_RATE,
+		.channels = PLAYBACK_CHANNEL_NUM
 	};
 
 	static const pa_buffer_attr buffer_attr = {
 		.tlength   = (uint32_t) PLAYBACK_LATENCY_BUF_SIZE,
-        .minreq    = (uint32_t) PCM_FRAME_BUF_SIZE,
+        .minreq    = (uint32_t) PLAYBACK_PCM_FRAME_BUF_SIZE,
     	.maxlength = (uint32_t) -1,
         .prebuf    = (uint32_t) PLAYBACK_LATENCY_BUF_SIZE,
         .fragsize  = (uint32_t) -1
@@ -1621,7 +1892,7 @@ static int pcm_pulse_playback(pa_simple *pcm_handler,
     	JANUS_LOG(LOG_WARN, "%0.0f usec    \n", (float)latency);
 	}
 #endif
-	return pa_simple_write(pcm_handler, pcm_buf, sample_num * CHANNELS * sizeof(opus_int16), error);
+	return pa_simple_write(pcm_handler, pcm_buf, sample_num * PLAYBACK_CHANNEL_NUM * PLAYBACK_SAMPLE_SIZE, error);
 }
 
 static int pcm_pulse_record(pa_simple *pcm_handler, 
@@ -1636,7 +1907,7 @@ static int pcm_pulse_record(pa_simple *pcm_handler,
     	JANUS_LOG(LOG_WARN, "%0.0f usec    \n", (float)latency);
 	}
 #endif
-	return pa_simple_read(pcm_handler, pcm_buf, sample_num * RECORD_CHANNEL_NUM * sizeof(opus_int16), error);
+	return pa_simple_read(pcm_handler, pcm_buf, sample_num * RECORD_CHANNEL_NUM * RECORD_SAMPLE_SIZE, error);
 }
 
 static void pcm_pulse_close(pa_simple *pcm_handler)
@@ -2003,8 +2274,11 @@ static void janus_safievoice_relay_rtp_packet(
 		packet->data->timestamp);
 #endif
 
-	if(gateway != NULL)
+	if(gateway != NULL) {
 		gateway->relay_rtp(session->handle, 0, (char *)packet->data, packet->length);
+		session->total_out_rtp_cnt ++;
+		session->total_out_rtp_size += packet->length;
+	}
 }
 
 static void *janus_safievoice_uploader(void *data) {
