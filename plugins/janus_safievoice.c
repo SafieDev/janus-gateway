@@ -1799,7 +1799,7 @@ static pa_simple* pcm_pulse_open_record_device(const char* name, pa_stream_direc
 	static const pa_buffer_attr buffer_attr = {
 		.tlength   = (uint32_t) -1,
         .minreq    = (uint32_t) -1,
-    	.maxlength = (uint32_t) RECORD_LATENCY_PCM_BUF_SIZE,
+    	.maxlength = (uint32_t) RECORD_LATENCY_BUF_SIZE,
         .prebuf    = (uint32_t) -1,
         .fragsize  = (uint32_t) -1
 	};
