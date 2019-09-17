@@ -178,6 +178,7 @@ static struct janus_safievoice_latency_skip_param {
 #define PLAYBACK_LATENCY_SAMPLE_NUM    (PLAYBACK_LATENCY_FRAME_NUM*PLAYBACK_SAMPLE_PER_FRAME)
 #define PLAYBACK_LATENCY_IN_USEC       (PLAYBACK_LATENCY_FRAME_NUM*PLAYBACK_MSEC_PER_FRAME*USEC_PER_MSEC)
 #define PLAYBACK_LATENCY_BUF_SIZE      (PLAYBACK_LATENCY_FRAME_NUM*PLAYBACK_PCM_FRAME_BUF_SIZE)
+#define PLAYBACK_MAX_LATENCY_BUF_SIZE  (PLAYBACK_PCM_BUF_SIZE_PER_SEC*LATENCY_CONTROL_EMERGENCY_THRESHOLD/USEC_PER_SEC)
 
 #define MIN_SAMPLE_NUM_TO_DECODE  (120*PLAYBACK_SAMPLE_RATE/1000)     /* to decode opus: maximum packet duration (120ms; 5760 for 48kHz) */
 #define MIN_BUFFER_SIZE_TO_DECODE (MIN_SAMPLE_NUM_TO_DECODE*PLAYBACK_CHANNEL_NUM*PLAYBACK_SAMPLE_SIZE)
@@ -196,6 +197,7 @@ static struct janus_safievoice_latency_skip_param {
 #define RECORD_LATENCY_SAMPLE_NUM    (RECORD_LATENCY_FRAME_NUM*RECORD_SAMPLE_PER_FRAME)
 #define RECORD_LATENCY_IN_USEC       (RECORD_LATENCY_FRAME_NUM*RECORD_MSEC_PER_FRAME*USEC_PER_MSEC)
 #define RECORD_LATENCY_BUF_SIZE      (RECORD_LATENCY_FRAME_NUM*RECORD_PCM_FRAME_BUF_SIZE)
+#define RECORD_MAX_LATENCY_BUF_SIZE  (RECORD_PCM_BUF_SIZE_PER_SEC) /* 1s */
 #define RECORD_TIMESTAMP_SAMPLE_NUM  (RECORD_MSEC_PER_FRAME*48000/MSEC_PER_SEC)    /* 60 ms/frame */
 #define RECORD_OPUS_FRAME_BUF_SIZE   (1000)
 
@@ -1752,11 +1754,15 @@ static void pcm_alsa_close(snd_pcm_t *pcm_handler)
     snd_pcm_close(pcm_handler);
 }
 #else
-static pa_simple* pcm_pulse_open(const char* name, pa_stream_direction_t dir, const char* stream_name, int* error);
-static int pcm_pulse_playback(pa_simple *pcm_handler, opus_int16* pcm_buf, uint32_t sample_num, int* error);
+static pa_simple* pcm_pulse_open_playback(const char* name, const char* stream_name);
+static int pcm_pulse_playback(pa_simple *pcm_handler, opus_int16* pcm_buf, uint32_t sample_num);
+
+static pa_simple* pcm_pulse_open_record(const char* name, const char* stream_name);
+static int pcm_pulse_record(pa_simple *pcm_handler, opus_int16* pcm_buf, uint32_t sample_num);
+
 static void pcm_pulse_close(pa_simple *pcm_handler);
 
-static pa_simple* pcm_pulse_open(const char* name, pa_stream_direction_t dir, const char* stream_name, int* error)
+static pa_simple* pcm_pulse_open_playback(const char* name, const char* stream_name)
 {
 	static const pa_sample_spec ss = {
 		.format   = PA_SAMPLE_S16LE,
@@ -1765,30 +1771,34 @@ static pa_simple* pcm_pulse_open(const char* name, pa_stream_direction_t dir, co
 	};
 
 	static const pa_buffer_attr buffer_attr = {
-		.tlength   = (uint32_t) PLAYBACK_LATENCY_BUF_SIZE,
-        .minreq    = (uint32_t) PLAYBACK_PCM_FRAME_BUF_SIZE,
+		.tlength   = (uint32_t) -1,
+        .minreq    = (uint32_t) -1,
     	.maxlength = (uint32_t) -1,
         .prebuf    = (uint32_t) PLAYBACK_LATENCY_BUF_SIZE,
         .fragsize  = (uint32_t) -1
 	};
 
 	JANUS_LOG(LOG_WARN, 
-				"dir=%d, buffer_attr(tlength=%d, minreq=%d, prebuf=%d)\n",
-				dir, 
-				buffer_attr.tlength, buffer_attr.minreq, buffer_attr.prebuf);
+				"playback, buffer_attr(tlength=%d, minreq=%d, prebuf=%d, maxlength=%d, fragsize=%d)\n",
+				buffer_attr.tlength, buffer_attr.minreq, buffer_attr.prebuf, buffer_attr.maxlength, buffer_attr.fragsize);
 
-	return pa_simple_new(NULL, 
+	int error;
+	pa_simple *handler = pa_simple_new(NULL, 
 					name,
-					dir,
+					PA_STREAM_PLAYBACK,
 					NULL, /* device: use default */
 					stream_name,
 					&ss,
 					NULL, /* channel map */
 					&buffer_attr, 
-					error);
+					&error);
+	if (handler == NULL) {
+		JANUS_LOG(LOG_ERR, ": pcm_pulse_open_playback() failed(%d): %s\n", error, pa_strerror(error));
+ 	}
+	return handler;
 }
 
-static pa_simple* pcm_pulse_open_record_device(const char* name, pa_stream_direction_t dir, const char* stream_name, int* error)
+static pa_simple* pcm_pulse_open_record(const char* name, const char* stream_name)
 {
 	static const pa_sample_spec ss = {
 		.format   = PA_SAMPLE_S16LE,
@@ -1799,31 +1809,35 @@ static pa_simple* pcm_pulse_open_record_device(const char* name, pa_stream_direc
 	static const pa_buffer_attr buffer_attr = {
 		.tlength   = (uint32_t) -1,
         .minreq    = (uint32_t) -1,
-    	.maxlength = (uint32_t) RECORD_LATENCY_BUF_SIZE,
+    	.maxlength = (uint32_t) RECORD_MAX_LATENCY_BUF_SIZE,
         .prebuf    = (uint32_t) -1,
         .fragsize  = (uint32_t) -1
 	};
 
 	JANUS_LOG(LOG_WARN, 
-				"dir=%d, buffer_attr(tlength=%d, minreq=%d, prebuf=%d)\n",
-				dir, 
-				buffer_attr.tlength, buffer_attr.minreq, buffer_attr.prebuf);
+				"record, buffer_attr(tlength=%d, minreq=%d, prebuf=%d, maxlength=%d, fragsize=%d)\n",
+				buffer_attr.tlength, buffer_attr.minreq, buffer_attr.prebuf, buffer_attr.maxlength, buffer_attr.fragsize);
 
-	return pa_simple_new(NULL, 
+	int error;
+	pa_simple *handler = pa_simple_new(NULL, 
 					name,
-					dir,
+					PA_STREAM_RECORD,
 					NULL,
 					//"bluez_source.50_1A_A5_B6_95_03.headset_head_unit", /* device: use default */
 					stream_name,
 					&ss,
 					NULL, /* channel map */
 					&buffer_attr, 
-					error);
+					&error);
+	if (handler == NULL) {
+		JANUS_LOG(LOG_ERR, ": pcm_pulse_open_record() failed(%d): %s\n",
+					error, pa_strerror(error));
+ 	}
+	return handler;
 }
 
 static int pcm_pulse_playback(pa_simple *pcm_handler, 
-								opus_int16* pcm_buf, uint32_t sample_num, 
-								int* error)
+								opus_int16* pcm_buf, uint32_t sample_num)
 {
 #if 0
     pa_usec_t latency;
@@ -1833,12 +1847,17 @@ static int pcm_pulse_playback(pa_simple *pcm_handler,
     	JANUS_LOG(LOG_WARN, "%0.0f usec    \n", (float)latency);
 	}
 #endif
-	return pa_simple_write(pcm_handler, pcm_buf, sample_num * PLAYBACK_CHANNEL_NUM * PLAYBACK_SAMPLE_SIZE, error);
+	int error;
+	int ret = pa_simple_write(pcm_handler, pcm_buf, sample_num * PLAYBACK_CHANNEL_NUM * PLAYBACK_SAMPLE_SIZE, &error);
+	if (ret < 0) {
+		JANUS_LOG(LOG_ERR, ": pa_simple_write() failed(%d): %s\n", error, pa_strerror(error));
+ 	}
+
+	 return ret;
 }
 
 static int pcm_pulse_record(pa_simple *pcm_handler, 
-								opus_int16* pcm_buf, uint32_t sample_num, 
-								int* error)
+								opus_int16* pcm_buf, uint32_t sample_num)
 {
 #if 0
     pa_usec_t latency;
@@ -1848,7 +1867,12 @@ static int pcm_pulse_record(pa_simple *pcm_handler,
     	JANUS_LOG(LOG_WARN, "%0.0f usec    \n", (float)latency);
 	}
 #endif
-	return pa_simple_read(pcm_handler, pcm_buf, sample_num * RECORD_CHANNEL_NUM * RECORD_SAMPLE_SIZE, error);
+	int error;
+	int ret = pa_simple_read(pcm_handler, pcm_buf, sample_num * RECORD_CHANNEL_NUM * RECORD_SAMPLE_SIZE, &error);
+	if (ret < 0) {
+		JANUS_LOG(LOG_ERR, ": pa_simple_read() failed(%d): %s\n", error, pa_strerror(error));
+ 	}
+	return ret;
 }
 
 static void pcm_pulse_close(pa_simple *pcm_handler)
@@ -1873,14 +1897,7 @@ static gboolean pcm_speaker_open(void)
 #if !defined(JANUS_USE_PLUSE_AUDIO)
     	speaker_handler = pcm_alsa_open(SND_PCM_STREAM_PLAYBACK);
 #else
-		int error = 0;
-    	speaker_handler = pcm_pulse_open(JANUS_SAFIEVOICE_PACKAGE, 
-										PA_STREAM_PLAYBACK, 
-										"janus.playback", 
-										&error);
-		if (speaker_handler == NULL) {
-			JANUS_LOG(LOG_ERR, ": pcm_pulse_open() failed(%d): %s\n", error, pa_strerror(error));
- 		}
+    	speaker_handler = pcm_pulse_open_playback(JANUS_SAFIEVOICE_PACKAGE, "janus.playback");
 #endif
 	}
 
@@ -1901,11 +1918,7 @@ static int pcm_speaker_playback(opus_int16* pcm_buf, uint32_t sample_num)
 #if !defined(JANUS_USE_PLUSE_AUDIO)
     ret = pcm_alsa_io(speaker_handler, pcm_buf, sample_num);
 #else
-	int error = 0;
-    ret = pcm_pulse_playback(speaker_handler, pcm_buf, sample_num, &error);
-	if (ret < 0) {
-		JANUS_LOG(LOG_ERR, ": pcm_pulse_playback() failed(%d): %s\n", error, pa_strerror(error));
- 	}
+    ret = pcm_pulse_playback(speaker_handler, pcm_buf, sample_num);
 #endif
 
 	return ret;
@@ -2005,14 +2018,8 @@ static gboolean pcm_recorder_open(void)
 #if !defined(JANUS_USE_PLUSE_AUDIO)
     	recorder_handler = pcm_alsa_open(SND_PCM_STREAM_CAPTURE);
 #else
-		int error = 0;
-    	recorder_handler = pcm_pulse_open_record_device(
-								JANUS_SAFIEVOICE_PACKAGE, 
-								PA_STREAM_RECORD, "janus.record", &error);
-		if (recorder_handler == NULL) {
-			JANUS_LOG(LOG_ERR, ": pcm_pulse_open_record_device() failed(%d): %s\n",
-						error, pa_strerror(error));
- 		}
+    	recorder_handler = pcm_pulse_open_record(
+								JANUS_SAFIEVOICE_PACKAGE, "janus.record");
 #endif
 	}
 
@@ -2033,11 +2040,7 @@ static int pcm_recorder_record(opus_int16* pcm_buf, uint32_t sample_num)
 #if !defined(JANUS_USE_PLUSE_AUDIO)
     ret = pcm_alsa_io(recorder_handler, pcm_buf, sample_num);
 #else
-	int error = 0;
-    ret = pcm_pulse_record(recorder_handler, pcm_buf, sample_num, &error);
-	if (ret < 0) {
-		JANUS_LOG(LOG_ERR, ": pcm_pulse_playback() failed(%d): %s\n", error, pa_strerror(error));
- 	}
+    ret = pcm_pulse_record(recorder_handler, pcm_buf, sample_num);
 #endif
 	return ret;
 }
