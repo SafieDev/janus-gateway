@@ -164,6 +164,20 @@ static struct janus_safievoice_latency_skip_param {
     {1, 4}, /* kill section */
 };
 
+#ifndef xstr
+#define xstr(s) str(s)
+#endif
+
+#ifndef str
+#define str(s) #s
+#endif
+
+/* ALSA Device Name */
+#if defined(WEBRTC_ALSA_DEVICE_NAME)
+#define ALSA_DEVICE_NAME xstr(WEBRTC_ALSA_DEVICE_NAME)
+#else
+#define ALSA_DEVICE_NAME "default"
+#endif
 
 /* Playback */
 #define PLAYBACK_SAMPLE_RATE           (48000)
@@ -1464,7 +1478,7 @@ static snd_pcm_t* pcm_alsa_open(snd_pcm_stream_t stream)
     snd_pcm_t *pcm_handler = NULL;
 
 	/* Open the PCM device in playback mode */
-	err = snd_pcm_open(&pcm_handler, "default", stream, 
+	err = snd_pcm_open(&pcm_handler, ALSA_DEVICE_NAME, stream, 
 #if 1
 						0 /* block */
 #else
@@ -2059,7 +2073,7 @@ static void *janus_safievoice_recorder(void *data) {
     JANUS_LOG(LOG_WARN, "SafieVoice recorder thread started\n");
 
 	if (!pcm_recorder_open()) {
-		JANUS_LOG(LOG_ERR, "Failed to open pulse recorder\n");
+		JANUS_LOG(LOG_ERR, "Failed to open recorder\n");
 	}
 
 	guint session_num = 0;
