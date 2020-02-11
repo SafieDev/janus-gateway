@@ -180,8 +180,16 @@ static struct janus_safievoice_latency_skip_param {
 #endif
 
 /* Playback */
+#if defined(PLAYBACK_DEVICE_SAMPLE_RATE)
+#define PLAYBACK_SAMPLE_RATE           (PLAYBACK_DEVICE_SAMPLE_RATE)
+#else
 #define PLAYBACK_SAMPLE_RATE           (48000)
+#endif
+#if defined(PLAYBACK_DEVICE_CHANNEL_NUM)
+#define PLAYBACK_CHANNEL_NUM           (PLAYBACK_DEVICE_CHANNEL_NUM)
+#else
 #define PLAYBACK_CHANNEL_NUM           (2)
+#endif
 #define PLAYBACK_MSEC_PER_FRAME        (20)
 #define PLAYBACK_USEC_PER_FRAME        (PLAYBACK_MSEC_PER_FRAME*USEC_PER_MSEC)
 #define PLAYBACK_SAMPLE_PER_FRAME      (PLAYBACK_MSEC_PER_FRAME*PLAYBACK_SAMPLE_RATE/MSEC_PER_SEC)                      /* 20 ms/frame */
