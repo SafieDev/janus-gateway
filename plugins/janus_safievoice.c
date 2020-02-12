@@ -180,6 +180,12 @@ static struct janus_safievoice_latency_skip_param {
 #endif
 
 /* Playback */
+#define INCOMING_SAMPLE_RATE           (48000)
+#define INCOMING_CHANNEL_NUM           (2)
+#define INCOMING_FRAME_MSEC            (20)
+#define INCOMING_FRAME_USEC            (INCOMING_FRAME_MSEC*USEC_PER_MSEC)
+#define INCOMING_FRAME_SAMPLE_NUM      (INCOMING_FRAME_MSEC*INCOMING_SAMPLE_RATE/MSEC_PER_SEC)                      /* 20 ms/frame */
+
 #if defined(PLAYBACK_DEVICE_SAMPLE_RATE)
 #define PLAYBACK_SAMPLE_RATE           (PLAYBACK_DEVICE_SAMPLE_RATE)
 #else
@@ -190,17 +196,13 @@ static struct janus_safievoice_latency_skip_param {
 #else
 #define PLAYBACK_CHANNEL_NUM           (2)
 #endif
-#define PLAYBACK_MSEC_PER_FRAME        (20)
-#define PLAYBACK_USEC_PER_FRAME        (PLAYBACK_MSEC_PER_FRAME*USEC_PER_MSEC)
-#define PLAYBACK_SAMPLE_PER_FRAME      (PLAYBACK_MSEC_PER_FRAME*PLAYBACK_SAMPLE_RATE/MSEC_PER_SEC)                      /* 20 ms/frame */
 #define PLAYBACK_SAMPLE_SIZE           sizeof(opus_int16)
 #define PLAYBACK_PCM_BUF_SIZE_PER_SEC  (PLAYBACK_SAMPLE_RATE*PLAYBACK_CHANNEL_NUM*PLAYBACK_SAMPLE_SIZE)
-#define PLAYBACK_PCM_FRAME_BUF_SIZE    (PLAYBACK_SAMPLE_PER_FRAME*PLAYBACK_CHANNEL_NUM*PLAYBACK_SAMPLE_SIZE)
+#define PLAYBACK_PCM_FRAME_BUF_SIZE    (PLAYBACK_SAMPLE_RATE*PLAYBACK_CHANNEL_NUM*PLAYBACK_SAMPLE_SIZE)
 #define PLAYBACK_LATENCY_FRAME_NUM     (3)  /* 3*20 = 60 ms*/
-#define PLAYBACK_LATENCY_SAMPLE_NUM    (PLAYBACK_LATENCY_FRAME_NUM*PLAYBACK_SAMPLE_PER_FRAME)
-#define PLAYBACK_LATENCY_IN_USEC       (PLAYBACK_LATENCY_FRAME_NUM*PLAYBACK_MSEC_PER_FRAME*USEC_PER_MSEC)
+#define PLAYBACK_LATENCY_SAMPLE_NUM    (PLAYBACK_LATENCY_FRAME_NUM*PLAYBACK_SAMPLE_RATE)
+#define PLAYBACK_LATENCY_IN_USEC       (PLAYBACK_LATENCY_FRAME_NUM*INCOMING_FRAME_MSEC*USEC_PER_MSEC)
 #define PLAYBACK_LATENCY_BUF_SIZE      (PLAYBACK_LATENCY_FRAME_NUM*PLAYBACK_PCM_FRAME_BUF_SIZE)
-#define PLAYBACK_MAX_LATENCY_BUF_SIZE  (PLAYBACK_PCM_BUF_SIZE_PER_SEC*LATENCY_CONTROL_EMERGENCY_THRESHOLD/USEC_PER_SEC)
 
 #define MIN_SAMPLE_NUM_TO_DECODE  (120*PLAYBACK_SAMPLE_RATE/1000)     /* to decode opus: maximum packet duration (120ms; 5760 for 48kHz) */
 #define MIN_BUFFER_SIZE_TO_DECODE (MIN_SAMPLE_NUM_TO_DECODE*PLAYBACK_CHANNEL_NUM*PLAYBACK_SAMPLE_SIZE)
@@ -1070,10 +1072,10 @@ void janus_safievoice_incoming_rtp(janus_plugin_session *handle, int video, char
 
     gint buffering_frames_num = g_async_queue_length(player_request_queue);
     buffering_frames_num = buffering_frames_num < 0 ? 0 : buffering_frames_num;
-    long int buffering_latency = buffering_frames_num * PLAYBACK_USEC_PER_FRAME;
+    long int buffering_latency = buffering_frames_num * INCOMING_FRAME_USEC;
 
     uint32_t hl_timestamp = ntohl(rtp->timestamp);
-    long int expect_time = session->first_in_rtp_time + ((hl_timestamp / PLAYBACK_SAMPLE_PER_FRAME) * PLAYBACK_USEC_PER_FRAME);
+    long int expect_time = session->first_in_rtp_time + ((hl_timestamp / INCOMING_FRAME_SAMPLE_NUM) * INCOMING_FRAME_USEC);
     long int incoming_latency = rtp_time - expect_time;
 
     long int total_latency = buffering_latency + incoming_latency + PLAYBACK_LATENCY_IN_USEC;
