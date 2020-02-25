@@ -210,7 +210,11 @@ static struct janus_safievoice_latency_skip_param {
 
 
 /* Record */
+#if defined(RECORD_DEVICE_SAMPLE_RATE)
+#define RECORD_SAMPLE_RATE           (RECORD_DEVICE_SAMPLE_RATE)
+#else
 #define RECORD_SAMPLE_RATE           (8000)
+#endif
 #define RECORD_CHANNEL_NUM           (1)
 #define RECORD_MSEC_PER_FRAME        (60)
 #define RECORD_USEC_PER_FRAME        (RECORD_MSEC_PER_FRAME*USEC_PER_MSEC)
