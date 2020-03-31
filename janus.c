@@ -893,23 +893,25 @@ int janus_process_incoming_request(janus_request *request) {
 		    turn = json_object_get(config, "turn_server");
 		if (turn) {
 			json_t *o_url  = json_object_get(turn, "url");
+			char * turn_server = o_url ? json_string_value(o_url) : NULL;
 			json_t *o_port = json_object_get(turn, "port");
+			uint16_t turn_port = o_port ? json_integer_value(o_port) : NULL;
 			json_t *o_type = json_object_get(turn, "type");
+			char * turn_type = o_type ? json_string_value(o_type) : NULL;
 			json_t *o_user = json_object_get(turn, "username");
+			char * turn_user = o_user ? json_string_value(o_user) : NULL;
 			json_t *o_pwd  = json_object_get(turn, "credential");
-			if (o_url && o_port && o_type && o_user && o_pwd) {
-				char * turn_server = json_string_value(o_url);
-				uint16_t turn_port = json_integer_value(o_port);
-				char * turn_type = json_string_value(o_type);
-				char * turn_user = json_string_value(o_user);
-				char * turn_pwd = json_string_value(o_pwd);
-
-				JANUS_LOG(LOG_FATAL, "turn_server=%s, turn_port=%d, turn_type=%s, turn_user=%s, turn_pwd=%s\n", 
+			char * turn_pwd = o_pwd ? json_string_value(o_pwd) : NULL;
+			if (turn_server && turn_port && turn_user && turn_pwd) {
+				JANUS_LOG(LOG_FATAL, "try to set turn_server=%s, turn_port=%d, turn_type=%s, turn_user=%s, turn_pwd=%s\n", 
 						turn_server, turn_port, turn_type, turn_user, turn_pwd);
 
 				if(janus_ice_set_turn_server(turn_server, turn_port, turn_type, turn_user, turn_pwd) < 0) {
 					JANUS_LOG(LOG_FATAL, "Invalid TURN address %s:%u\n", turn_server, turn_port);
 				}
+			} else {
+				JANUS_LOG(LOG_FATAL, "failed to set turn_server=%s, turn_port=%d, turn_type=%s, turn_user=%s, turn_pwd=%s\n", 
+						turn_server, turn_port, turn_type, turn_user, turn_pwd);
 			}
 		}
 
