@@ -141,7 +141,7 @@
 #define USEC_PER_MSEC             (1000)
 #define USEC_PER_SEC              (USEC_PER_MSEC*MSEC_PER_SEC)
 
-#define PLAYER_RESPONSE_TIMEOUT   (5*USEC_PER_SEC)      /* 5s */
+#define PLAYER_RESPONSE_TIMEOUT   (1*USEC_PER_SEC)      /* 5s */
 #define NO_MEDIA_TIMEOUT          (10*USEC_PER_SEC)     /* 10s */
 #define LOG_ALIVE_TIMEOUT         (2*60*USEC_PER_SEC)   /* 2min */
 
@@ -204,6 +204,7 @@ static struct janus_safievoice_latency_skip_param {
 #define PLAYBACK_LATENCY_SAMPLE_NUM    (PLAYBACK_LATENCY_FRAME_NUM*PLAYBACK_SAMPLE_RATE)
 #define PLAYBACK_LATENCY_IN_USEC       (PLAYBACK_LATENCY_FRAME_NUM*INCOMING_FRAME_MSEC*USEC_PER_MSEC)
 #define PLAYBACK_LATENCY_BUF_SIZE      (PLAYBACK_LATENCY_FRAME_NUM*PLAYBACK_PCM_FRAME_BUF_SIZE)
+#define PLAYBACK_MAX_LATENCY_IN_USEC   (1000000)
 
 #define MIN_SAMPLE_NUM_TO_DECODE  (120*PLAYBACK_SAMPLE_RATE/1000)     /* to decode opus: maximum packet duration (120ms; 5760 for 48kHz) */
 #define MIN_BUFFER_SIZE_TO_DECODE (MIN_SAMPLE_NUM_TO_DECODE*PLAYBACK_CHANNEL_NUM*PLAYBACK_SAMPLE_SIZE)
@@ -815,10 +816,13 @@ void janus_safievoice_create_session(janus_plugin_session *handle, int *error) {
     janus_safievoice_player_response_message *msg =
         g_async_queue_timeout_pop(player_response_queue, PLAYER_RESPONSE_TIMEOUT);
     if ((msg == NULL) || (msg != &player_open_succeeded)) {
-		JANUS_LOG(LOG_ERR, "failded to create session as player can not be open!\n");
+		JANUS_LOG(LOG_ERR, "failded to create session as player can not be open! msg=%p, ok=%p, ng=%p\n",
+			msg, &player_open_succeeded, &player_open_failed);
         *error = -1;
         return;
     }
+	JANUS_LOG(LOG_ERR, "successed to create session as player can be open! msg=%p, ok=%p, ng=%p\n",
+		msg, &player_open_succeeded, &player_open_failed);
 
 	session->seq = 0;
 	session->record_seq = 0;
@@ -862,6 +866,8 @@ void janus_safievoice_destroy_session(janus_plugin_session *handle, int *error) 
     if ((msg == NULL) || (msg != &player_close_succeeded)) {
 		JANUS_LOG(LOG_ERR, "Can not close player...0x%p\n", msg);
     }
+	JANUS_LOG(LOG_ERR, "closed player! msg=%p, ok=%p\n",
+		msg, &player_close_succeeded);
 
 	if (session->first_in_rtp_time != 0) {
 		g_async_queue_push(recorder_request_queue, &recorder_close_message);
@@ -1824,6 +1830,7 @@ static pa_simple* pcm_pulse_open_playback(const char* name, const char* stream_n
 	if (handler == NULL) {
 		JANUS_LOG(LOG_ERR, ": pcm_pulse_open_playback() failed(%d): %s\n", error, pa_strerror(error));
  	}
+	JANUS_LOG(LOG_ERR, ": pcm_pulse_open_playback() OK\n");
 	return handler;
 }
 
@@ -1868,15 +1875,22 @@ static pa_simple* pcm_pulse_open_record(const char* name, const char* stream_nam
 static int pcm_pulse_playback(pa_simple *pcm_handler, 
 								opus_int16* pcm_buf, uint32_t sample_num)
 {
-#if 0
+	int error;
+#if 1
     pa_usec_t latency;
-    if ((latency = pa_simple_get_latency(pcm_handler, error)) == (pa_usec_t) -1) {
-        JANUS_LOG(LOG_WARN, ": pa_simple_get_latency() failed: %s\n", pa_strerror(*error));
-    } else {
+    if ((latency = pa_simple_get_latency(pcm_handler, &error)) == (pa_usec_t) -1) {
+        JANUS_LOG(LOG_ERR, ": pa_simple_get_latency() failed: %s\n", pa_strerror(error));
+    }
+
+	if (latency >= PLAYBACK_MAX_LATENCY_IN_USEC) {
     	JANUS_LOG(LOG_WARN, "%0.0f usec    \n", (float)latency);
+		if (pa_simple_flush(pcm_handler, &error) != 0) {
+			JANUS_LOG(LOG_ERR, ": pa_simple_flush() failed: %s\n", pa_strerror(error));
+		} else {
+			JANUS_LOG(LOG_WARN, "flushed\n");
+		}
 	}
 #endif
-	int error;
 	int ret = pa_simple_write(pcm_handler, pcm_buf, sample_num * PLAYBACK_CHANNEL_NUM * PLAYBACK_SAMPLE_SIZE, &error);
 	if (ret < 0) {
 		JANUS_LOG(LOG_ERR, ": pa_simple_write() failed(%d): %s\n", error, pa_strerror(error));
@@ -1961,6 +1975,7 @@ static void pcm_speaker_close(void)
 		pcm_pulse_close(speaker_handler);
 #endif
 		speaker_handler = NULL;
+		JANUS_LOG(LOG_WARN, "pcm_speaker_close is done\n");
 	}
 }
 
