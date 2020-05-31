@@ -1467,6 +1467,14 @@ error:
 }
 
 #if !defined(JANUS_USE_PLUSE_AUDIO)
+static snd_pcm_t *speaker_handler = NULL;
+#else
+static pa_simple *speaker_handler = NULL;
+#endif
+
+
+
+#if !defined(JANUS_USE_PLUSE_AUDIO)
 static snd_pcm_t* pcm_alsa_open(snd_pcm_stream_t stream);
 static int pcm_alsa_playback(snd_pcm_t *pcm_handler, opus_int16* pcm_buf, uint32_t sample_num);
 static void pcm_alsa_close(snd_pcm_t *pcm_handler);
@@ -1876,21 +1884,24 @@ static int pcm_pulse_playback(pa_simple *pcm_handler,
 								opus_int16* pcm_buf, uint32_t sample_num)
 {
 	int error;
-#if 1
-    pa_usec_t latency;
-    if ((latency = pa_simple_get_latency(pcm_handler, &error)) == (pa_usec_t) -1) {
-        JANUS_LOG(LOG_ERR, ": pa_simple_get_latency() failed: %s\n", pa_strerror(error));
+    pa_usec_t latency = 0;
+    if ((latency = pa_simple_get_latency(pcm_handler, &error)) == (pa_usec_t) -1 ||
+		latency >= PLAYBACK_MAX_LATENCY_IN_USEC) {
+		if (latency <= 0) {
+			JANUS_LOG(LOG_ERR, ": pa_simple_get_latency() failed(%d): %s\n", error, pa_strerror(error));
+		} else {
+    		JANUS_LOG(LOG_WARN, "%0.0f usec    \n", (float)latency);
+		}
+
+		pcm_pulse_close(speaker_handler);
+		speaker_handler = NULL;
+		speaker_handler = pcm_pulse_open_playback(JANUS_SAFIEVOICE_PACKAGE, "janus.playback");
+		if (speaker_handler == NULL) {
+			JANUS_LOG(LOG_WARN, "sink not ready\n");
+			return -1;
+		}
     }
 
-	if (latency >= PLAYBACK_MAX_LATENCY_IN_USEC) {
-    	JANUS_LOG(LOG_WARN, "%0.0f usec    \n", (float)latency);
-		if (pa_simple_flush(pcm_handler, &error) != 0) {
-			JANUS_LOG(LOG_ERR, ": pa_simple_flush() failed: %s\n", pa_strerror(error));
-		} else {
-			JANUS_LOG(LOG_WARN, "flushed\n");
-		}
-	}
-#endif
 	int ret = pa_simple_write(pcm_handler, pcm_buf, sample_num * PLAYBACK_CHANNEL_NUM * PLAYBACK_SAMPLE_SIZE, &error);
 	if (ret < 0) {
 		JANUS_LOG(LOG_ERR, ": pa_simple_write() failed(%d): %s\n", error, pa_strerror(error));
@@ -1902,14 +1913,14 @@ static int pcm_pulse_playback(pa_simple *pcm_handler,
 static int pcm_pulse_record(pa_simple *pcm_handler, 
 								opus_int16* pcm_buf, uint32_t sample_num, int* error)
 {
-#if 0
     pa_usec_t latency;
     if ((latency = pa_simple_get_latency(pcm_handler, error)) == (pa_usec_t) -1) {
         JANUS_LOG(LOG_WARN, ": pa_simple_get_latency() failed: %s\n", pa_strerror(*error));
-    } else {
-    	JANUS_LOG(LOG_WARN, "%0.0f usec    \n", (float)latency);
-	}
-#endif
+		return -1;
+    }
+
+    //JANUS_LOG(LOG_WARN, "%0.0f usec    \n", (float)latency);
+
 	int ret = pa_simple_read(pcm_handler, pcm_buf, sample_num * RECORD_CHANNEL_NUM * RECORD_SAMPLE_SIZE, error);
 	if (ret < 0) {
 		JANUS_LOG(LOG_ERR, ": pa_simple_read() failed(ret=%d, err=%d): %s\n", ret, *error, pa_strerror(*error));
@@ -1927,11 +1938,11 @@ static void pcm_pulse_close(pa_simple *pcm_handler)
 
 #endif
 
-#if !defined(JANUS_USE_PLUSE_AUDIO)
-static snd_pcm_t *speaker_handler = NULL;
-#else
-static pa_simple *speaker_handler = NULL;
-#endif
+
+static gboolean pcm_speaker_open(void);
+static int pcm_speaker_playback(opus_int16* pcm_buf, uint32_t sample_num);
+static void pcm_speaker_close(void);
+
 
 static gboolean pcm_speaker_open(void)
 {
@@ -1961,6 +1972,10 @@ static int pcm_speaker_playback(opus_int16* pcm_buf, uint32_t sample_num)
     ret = pcm_alsa_io(speaker_handler, pcm_buf, sample_num);
 #else
     ret = pcm_pulse_playback(speaker_handler, pcm_buf, sample_num);
+    if (ret != 0) {
+		pcm_speaker_close();
+		pcm_speaker_open();
+	}
 #endif
 
 	return ret;
@@ -2089,7 +2104,7 @@ static int pcm_recorder_record(opus_int16* pcm_buf, uint32_t sample_num)
 #else
 	int error = 0;
     ret = pcm_pulse_record(recorder_handler, pcm_buf, sample_num, error);
-	if (error == PA_ERR_CONNECTIONTERMINATED) {
+	if (ret != 0) {
 		pcm_recorder_close();
 		pcm_recorder_open();
 	}
