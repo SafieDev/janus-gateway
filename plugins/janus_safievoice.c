@@ -1046,6 +1046,8 @@ void janus_safievoice_setup_media(janus_plugin_session *handle) {
 	/* Only start recording this peer when we get this event */
 	session->start_time = janus_get_monotonic_time();
 	session->started = TRUE;
+	/* start record */
+	g_async_queue_push(recorder_request_queue, &recorder_open_message);
 	/* Prepare JSON event */
 	json_t *event = json_object();
 	json_object_set_new(event, "safievoice", json_string("event"));
@@ -1069,7 +1071,7 @@ void janus_safievoice_incoming_rtp(janus_plugin_session *handle, int video, char
         session->first_in_rtp_time = rtp_time;
         long int setup_time = (session->first_in_rtp_time - session->start_time);
         JANUS_LOG(LOG_WARN, "time[Media setup -> 1st rtp received] = %ld us\n", setup_time);
-		g_async_queue_push(recorder_request_queue, &recorder_open_message);
+		//g_async_queue_push(recorder_request_queue, &recorder_open_message);
     }
 
 	/* Save the frame */
@@ -2313,7 +2315,7 @@ static void *janus_safievoice_uploader(void *data) {
 
 #if 0
 		gint64 end_time = janus_get_monotonic_time();
-    	JANUS_LOG(LOG_WARN, "[session_num=%d] upload rtp(len=%d), record=%lld us, latencyToEncode=%lld us, encode=%lld us, upload=%lld us, latency=%lld us\n",
+    	JANUS_LOG(LOG_WARN, "[session_num=%d] upload rtp(len=%d), record=%lld us, record->encode=%lld us, encode=%lld us, upload=%lld us, total latency=%lld us\n",
 			session_num,
 			msg->outpkt->length,
 			(msg->recorded_time - msg->start_time),
