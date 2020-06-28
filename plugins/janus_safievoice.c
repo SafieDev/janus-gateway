@@ -141,7 +141,7 @@
 #define USEC_PER_MSEC             (1000)
 #define USEC_PER_SEC              (USEC_PER_MSEC*MSEC_PER_SEC)
 
-#define PLAYER_RESPONSE_TIMEOUT   (1*USEC_PER_SEC)      /* 5s */
+#define PLAYER_RESPONSE_TIMEOUT   (3*USEC_PER_SEC)      /* 3s */
 #define NO_MEDIA_TIMEOUT          (10*USEC_PER_SEC)     /* 10s */
 #define LOG_ALIVE_TIMEOUT         (2*60*USEC_PER_SEC)   /* 2min */
 
