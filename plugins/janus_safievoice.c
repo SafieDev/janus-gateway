@@ -246,8 +246,8 @@ const char *janus_safievoice_get_package(void);
 void janus_safievoice_create_session(janus_plugin_session *handle, int *error);
 struct janus_plugin_result *janus_safievoice_handle_message(janus_plugin_session *handle, char *transaction, json_t *message, json_t *jsep);
 void janus_safievoice_setup_media(janus_plugin_session *handle);
-void janus_safievoice_incoming_rtp(janus_plugin_session *handle, int video, char *buf, int len);
-void janus_safievoice_incoming_rtcp(janus_plugin_session *handle, int video, char *buf, int len);
+void janus_safievoice_incoming_rtp(janus_plugin_session *handle, janus_plugin_rtp *packet);
+void janus_safievoice_incoming_rtcp(janus_plugin_session *handle, janus_plugin_rtcp *packet);
 void janus_safievoice_slow_link(janus_plugin_session *handle, int uplink, int video);
 void janus_safievoice_hangup_media(janus_plugin_session *handle);
 void janus_safievoice_destroy_session(janus_plugin_session *handle, int *error);
@@ -334,8 +334,8 @@ typedef struct janus_safievoice_session {
 	guint16 slowlink_count;
 
 	int seq;
-	gboolean started;
-	gboolean stopping;
+	volatile gboolean started;
+	volatile gboolean stopping;
 	volatile gint hangingup;
 	volatile gint destroyed;
 	janus_refcount ref;
@@ -616,6 +616,7 @@ int janus_safievoice_init(janus_callbacks *callback, const char *config_path) {
 	if(error != NULL) {
 		g_atomic_int_set(&initialized, 0);
 		JANUS_LOG(LOG_ERR, "Got error %d (%s) trying to launch the SafieVoice handler thread...\n", error->code, error->message ? error->message : "??");
+		g_error_free(error);
 		return -1;
 	}
 
@@ -627,6 +628,7 @@ int janus_safievoice_init(janus_callbacks *callback, const char *config_path) {
         JANUS_LOG(LOG_ERR, 
 			"Got error %d (%s) trying to launch the SafieVoice player thread...\n", 
 			error->code, error->message ? error->message : "??");
+		g_error_free(error);
         /* @todo:join handler threads -> will janus_safievoice_destroy() be called?  */
         return -1;
     }
@@ -639,6 +641,7 @@ int janus_safievoice_init(janus_callbacks *callback, const char *config_path) {
         JANUS_LOG(LOG_ERR,
 			"Got error %d (%s) trying to launch the SafieVoice recorder thread...\n", 
 			error->code, error->message ? error->message : "??");
+		g_error_free(error);
         /* @todo:join handler threads -> will janus_safievoice_destroy() be called?  */
         return -1;
     }
@@ -651,6 +654,7 @@ int janus_safievoice_init(janus_callbacks *callback, const char *config_path) {
         JANUS_LOG(LOG_ERR,
 			"Got error %d (%s) trying to launch the SafieVoice encoder thread...\n", 
 			error->code, error->message ? error->message : "??");
+		g_error_free(error);
         /* @todo:join handler threads -> will janus_safievoice_destroy() be called?  */
         return -1;
     }
@@ -663,6 +667,7 @@ int janus_safievoice_init(janus_callbacks *callback, const char *config_path) {
         JANUS_LOG(LOG_ERR,
 			"Got error %d (%s) trying to launch the SafieVoice uploader thread...\n", 
 			error->code, error->message ? error->message : "??");
+		g_error_free(error);
         /* @todo:join handler threads -> will janus_safievoice_destroy() be called?  */
         return -1;
     }
@@ -828,8 +833,8 @@ void janus_safievoice_create_session(janus_plugin_session *handle, int *error) {
 	session->record_seq = 0;
 	session->record_start_time = 0;
 	session->opus_pt = 0;
-	session->started = FALSE;
-	session->stopping = FALSE;
+	g_atomic_int_set(&session->started, 0);
+	g_atomic_int_set(&session->stopping, 0);
 	g_atomic_int_set(&session->hangingup, 0);
 	g_atomic_int_set(&session->destroyed, 0);
 	janus_refcount_init(&session->ref, janus_safievoice_session_free);
@@ -892,7 +897,6 @@ void janus_safievoice_destroy_session(janus_plugin_session *handle, int *error) 
 		session->decoder = NULL;
 	}
 
-	handle->plugin_handle = NULL;
 	g_hash_table_remove(sessions, handle);
 	janus_mutex_unlock(&sessions_mutex);
 
@@ -1045,7 +1049,7 @@ void janus_safievoice_setup_media(janus_plugin_session *handle) {
 	g_atomic_int_set(&session->hangingup, 0);
 	/* Only start recording this peer when we get this event */
 	session->start_time = janus_get_monotonic_time();
-	session->started = TRUE;
+	g_atomic_int_set(&session->started, 1);
 	/* start record */
 	g_async_queue_push(recorder_request_queue, &recorder_open_message);
 	/* Prepare JSON event */
@@ -1058,11 +1062,12 @@ void janus_safievoice_setup_media(janus_plugin_session *handle) {
 	janus_refcount_decrease(&session->ref);
 }
 
-void janus_safievoice_incoming_rtp(janus_plugin_session *handle, int video, char *buf, int len) {
+void janus_safievoice_incoming_rtp(janus_plugin_session *handle, janus_plugin_rtp *packet) {
 	if(handle == NULL || g_atomic_int_get(&handle->stopped) || g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized))
 		return;
 	janus_safievoice_session *session = (janus_safievoice_session *)handle->plugin_handle;
-	if(!session || g_atomic_int_get(&session->destroyed) || session->stopping || !session->started || session->start_time == 0)
+	if(!session || g_atomic_int_get(&session->destroyed) || g_atomic_int_get(&session->stopping) ||
+			!g_atomic_int_get(&session->started) || session->start_time == 0)
 		return;
 
     gint64 rtp_time = janus_get_monotonic_time();
@@ -1075,6 +1080,8 @@ void janus_safievoice_incoming_rtp(janus_plugin_session *handle, int video, char
     }
 
 	/* Save the frame */
+	char *buf = packet->buffer;
+	uint16_t len = packet->length;
 	janus_rtp_header *rtp = (janus_rtp_header *)buf;
 	uint16_t seq = ntohs(rtp->seq_number);
 	if(session->seq == 0)
@@ -1095,7 +1102,7 @@ void janus_safievoice_incoming_rtp(janus_plugin_session *handle, int video, char
 	session->cur_in_latency = total_latency;
     if (total_latency > LATENCY_CONTROL_START_THRESHOLD) {
         session->overlatency_in_rtp_cnt ++;
-        int latency_level = GET_LATENCY_LEVEL(total_latency);
+        unsigned int latency_level = GET_LATENCY_LEVEL(total_latency);
         int skip_num = (latency_level < LATENCY_LEVEL_NUM) ? skip_params[latency_level].skip_num : 1;
         int skip_base = (latency_level < LATENCY_LEVEL_NUM) ? skip_params[latency_level].skip_base : 1;
         if ((session->overlatency_in_rtp_cnt % skip_base) < skip_num) {
@@ -1185,11 +1192,11 @@ void janus_safievoice_incoming_rtp(janus_plugin_session *handle, int video, char
 #endif
 }
 
-void janus_safievoice_incoming_rtcp(janus_plugin_session *handle, int video, char *buf, int len) {
+void janus_safievoice_incoming_rtcp(janus_plugin_session *handle, janus_plugin_rtcp *packet) {
 	if(handle == NULL || g_atomic_int_get(&handle->stopped) || g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized))
 		return;
-	guint32 bitrate = janus_rtcp_get_remb(buf, len);
-	///JANUS_LOG(LOG_WARN, "bitrate=%lu for %s\n",	bitrate, video ? "video" : "audio");
+	//int bitrate = janus_rtcp_get_remb(packet->buffer, (int)packet->length);
+	//JANUS_LOG(LOG_WARN, "bitrate=%d for %s\n",	bitrate, packet->video ? "video" : "audio");
 	/* FIXME Should we care? */
 }
 
@@ -1224,7 +1231,7 @@ static void janus_safievoice_hangup_media_internal(janus_plugin_session *handle)
 		JANUS_LOG(LOG_ERR, "No session associated with this handle...\n");
 		return;
 	}
-	session->started = FALSE;
+	g_atomic_int_set(&session->started, 0);
 	if(g_atomic_int_get(&session->destroyed))
 		return;
 	if(!g_atomic_int_compare_and_exchange(&session->hangingup, 0, 1))
@@ -1328,7 +1335,7 @@ static void *janus_safievoice_handler(void *data) {
 			/* Done: now wait for the setup_media callback to be called */
 			event = json_object();
 			json_object_set_new(event, "safievoice", json_string("event"));
-			json_object_set_new(event, "status", json_string(session->started ? "started" : "starting"));
+			json_object_set_new(event, "status", json_string(g_atomic_int_get(&session->started) ? "started" : "starting"));
 			/* Also notify event handlers */
 			if(notify_events && gateway->events_is_enabled()) {
 				json_t *info = json_object();
@@ -1338,7 +1345,7 @@ static void *janus_safievoice_handler(void *data) {
 		} else if(!strcasecmp(request_text, "update")) {
 			/* Only needed in case of renegotiations and ICE restarts (but with 10s messages is this worth it?) */
 			JANUS_LOG(LOG_VERB, "Updating existing recording\n");
-			if(session->decoder == NULL || !session->started) {
+			if(session->decoder == NULL || !g_atomic_int_get(&session->started)) {
 				JANUS_LOG(LOG_ERR, "Invalid state (not recording)\n");
 				error_code = JANUS_SAFIEVOICE_ERROR_INVALID_STATE;
 				g_snprintf(error_cause, 512, "Invalid state (not recording)");
@@ -1350,8 +1357,8 @@ static void *janus_safievoice_handler(void *data) {
 			json_object_set_new(event, "status", json_string("updating"));
 		} else if(!strcasecmp(request_text, "stop")) {
 			/* Stop the recording */
-			session->started = FALSE;
-			session->stopping = TRUE;
+			g_atomic_int_set(&session->started, 0);
+			g_atomic_int_set(&session->stopping, 1);
 
 #if defined(DUMP_RAW_PCM)
 			if (session->opus_fd >= 0) {
@@ -1443,11 +1450,11 @@ static void *janus_safievoice_handler(void *data) {
 				/* TODO Failed to negotiate? We should remove this participant */
 			}
 		}
-		janus_safievoice_message_free(msg);
 
-		if(session->stopping) {
+		/* Tear down the session if we're done */
+		if(g_atomic_int_get(&session->stopping))
 			gateway->end_session(session->handle);
-		}
+		janus_safievoice_message_free(msg);
 
 		continue;
 
@@ -1762,7 +1769,7 @@ static int pcm_alsa_playback(snd_pcm_t *pcm_handler, opus_int16* pcm_buf, uint32
         pcm_ret = snd_pcm_writei(pcm_handler, pcm_buf + offset, write_size);
         if (pcm_ret == -EAGAIN) {
             if (retry_cnt > 10000) {
-                JANUS_LOG(LOG_WARN, "pcm_alsa_playback, retry cnt=%d.\n[%lld, %lld]\n", 
+                JANUS_LOG(LOG_WARN, "pcm_alsa_playback, retry cnt=%d.\n[%"G_GUINT64_FORMAT", %"G_GUINT64_FORMAT"]\n", 
 					retry_cnt, 
 					play_buffer_alloc_cnt - play_buffer_free_cnt,
 					record_buffer_alloc_cnt - record_buffer_free_cnt
@@ -1932,8 +1939,9 @@ static int pcm_pulse_record(pa_simple *pcm_handler,
 
 static void pcm_pulse_close(pa_simple *pcm_handler)
 {
-    if (pcm_handler == NULL)
+    if (pcm_handler == NULL) {
         return;
+	}
 
 	pa_simple_free(pcm_handler);
 }
@@ -2007,7 +2015,7 @@ static void *janus_safievoice_player(void *data) {
         if(msg == NULL) {
 			timeout_cnt++;
 			if (timeout_cnt % (LOG_ALIVE_TIMEOUT/NO_MEDIA_TIMEOUT) == 0) {
-            	JANUS_LOG(LOG_INFO, "[player thread] alive. but nothing received, timeout_cnt=%lld\n", timeout_cnt);
+            	JANUS_LOG(LOG_INFO, "[player thread] alive. but nothing received, timeout_cnt=%"G_GUINT64_FORMAT"\n", timeout_cnt);
 			}
 
             pcm_speaker_close();
@@ -2039,7 +2047,7 @@ static void *janus_safievoice_player(void *data) {
 
             long int done_time = janus_get_monotonic_time();
 #if 0
-            JANUS_LOG(LOG_WARN, "[player thread] received playback msg->(addr=%p, stamp=%lu, size=%d), latency=%ld, time(decode=%lld, writep=%lld)\n",
+            JANUS_LOG(LOG_WARN, "[player thread] received playback msg->(addr=%p, stamp=%lu, size=%d), latency=%ld, time(decode=%"G_GUINT64_FORMAT", writep=%"G_GUINT64_FORMAT")\n",
                       msg->pcm_buf,
                       msg->hl_timestamp,
                       msg->sample_num,
@@ -2105,7 +2113,7 @@ static int pcm_recorder_record(opus_int16* pcm_buf, uint32_t sample_num)
     ret = pcm_alsa_io(recorder_handler, pcm_buf, sample_num);
 #else
 	int error = 0;
-    ret = pcm_pulse_record(recorder_handler, pcm_buf, sample_num, error);
+    ret = pcm_pulse_record(recorder_handler, pcm_buf, sample_num, &error);
 	if (ret != 0) {
 		pcm_recorder_close();
 		pcm_recorder_open();
@@ -2198,7 +2206,7 @@ static void *janus_safievoice_encoder(void *data) {
         if(msg == NULL) {
 			timeout_cnt++;
 			if (timeout_cnt % (LOG_ALIVE_TIMEOUT/NO_MEDIA_TIMEOUT) == 0) {
-            	JANUS_LOG(LOG_INFO, "[encoder thread] alive. but nothing received, timeout_cnt=%lld\n", timeout_cnt);
+            	JANUS_LOG(LOG_INFO, "[encoder thread] alive. but nothing received, timeout_cnt=%"G_GUINT64_FORMAT"\n", timeout_cnt);
 			}
             continue;
 		} else if(msg == &encoder_exit_message) {
@@ -2282,7 +2290,16 @@ static void janus_safievoice_relay_rtp_packet(
 #endif
 
 	if(gateway != NULL) {
-		gateway->relay_rtp(session->handle, 0, (char *)packet->data, packet->length);
+		janus_plugin_rtp rtp;
+		rtp.video = FALSE;
+		rtp.buffer = (char*)packet->data;
+		rtp.length = packet->length;
+		rtp.extensions.audio_level = -1;
+		rtp.extensions.audio_level_vad = 1;
+		rtp.extensions.video_rotation = -1;
+		rtp.extensions.video_back_camera = FALSE;
+		rtp.extensions.video_flipped = FALSE;
+		gateway->relay_rtp(session->handle, &rtp);
 		session->total_out_rtp_cnt ++;
 		session->total_out_rtp_size += packet->length;
 	}
@@ -2298,7 +2315,7 @@ static void *janus_safievoice_uploader(void *data) {
         if(msg == NULL) {
 			timeout_cnt++;
 			if (timeout_cnt % (LOG_ALIVE_TIMEOUT/NO_MEDIA_TIMEOUT) == 0) {
-            	JANUS_LOG(LOG_INFO, "[uploader thread] alive. but nothing received, timeout_cnt=%lld\n", timeout_cnt);
+            	JANUS_LOG(LOG_INFO, "[uploader thread] alive. but nothing received, timeout_cnt=%"G_GUINT64_FORMAT"\n", timeout_cnt);
 			}
             continue;
 		} else if(msg == &uploader_exit_message) {
@@ -2315,7 +2332,7 @@ static void *janus_safievoice_uploader(void *data) {
 
 #if 0
 		gint64 end_time = janus_get_monotonic_time();
-    	JANUS_LOG(LOG_WARN, "[session_num=%d] upload rtp(len=%d), record=%lld us, record->encode=%lld us, encode=%lld us, upload=%lld us, total latency=%lld us\n",
+    	JANUS_LOG(LOG_WARN, "[session_num=%d] upload rtp(len=%d), record=%"G_GUINT64_FORMAT" us, record->encode=%"G_GUINT64_FORMAT" us, encode=%"G_GUINT64_FORMAT" us, upload=%"G_GUINT64_FORMAT" us, total latency=%"G_GUINT64_FORMAT" us\n",
 			session_num,
 			msg->outpkt->length,
 			(msg->recorded_time - msg->start_time),
