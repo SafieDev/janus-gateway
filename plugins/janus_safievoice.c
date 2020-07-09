@@ -1092,13 +1092,13 @@ void janus_safievoice_incoming_rtp(janus_plugin_session *handle, janus_plugin_rt
 
     gint buffering_frames_num = g_async_queue_length(player_request_queue);
     buffering_frames_num = buffering_frames_num < 0 ? 0 : buffering_frames_num;
-    long int buffering_latency = buffering_frames_num * INCOMING_FRAME_USEC;
+    gint64 buffering_latency = buffering_frames_num * INCOMING_FRAME_USEC;
 
     uint32_t hl_timestamp = ntohl(rtp->timestamp);
-    long int expect_time = session->first_in_rtp_time + ((hl_timestamp / INCOMING_FRAME_SAMPLE_NUM) * INCOMING_FRAME_USEC);
-    long int incoming_latency = rtp_time - expect_time;
+    gint64 expect_time = session->first_in_rtp_time + (((gint64)hl_timestamp / INCOMING_FRAME_SAMPLE_NUM) * INCOMING_FRAME_USEC);
+    gint64 incoming_latency = rtp_time - expect_time;
 
-    long int total_latency = buffering_latency + incoming_latency + PLAYBACK_LATENCY_IN_USEC;
+    gint64 total_latency = buffering_latency + incoming_latency + PLAYBACK_LATENCY_IN_USEC;
 	session->cur_in_latency = total_latency;
     if (total_latency > LATENCY_CONTROL_START_THRESHOLD) {
         session->overlatency_in_rtp_cnt ++;
@@ -1108,7 +1108,7 @@ void janus_safievoice_incoming_rtp(janus_plugin_session *handle, janus_plugin_rt
         if ((session->overlatency_in_rtp_cnt % skip_base) < skip_num) {
             session->skiped_in_rtp_cnt ++;
 
-            JANUS_LOG(LOG_ERR, "Skip total timeover rtp->{seq=%d, skiped:total:to=%ld:%ld:%ld} as latency(%ld:%ld:%ld) > %d ms, skip(lvl%d) rate=%lf\n",
+            JANUS_LOG(LOG_ERR, "Skip total timeover rtp->{seq=%d, skiped:total:to=%ld:%ld:%ld} as latency(%"G_GINT64_FORMAT":%"G_GINT64_FORMAT":%"G_GINT64_FORMAT") > %d ms, skip(lvl%d) rate=%lf\n",
                       seq,
                       (long int)session->skiped_in_rtp_cnt,
                       (long int)session->total_in_rtp_cnt,
