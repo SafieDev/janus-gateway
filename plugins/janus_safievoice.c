@@ -968,7 +968,16 @@ struct janus_plugin_result *janus_safievoice_handle_message(janus_plugin_session
 	if(!strcasecmp(request_text, "info")) {
 		/* Get info of session */
 		JANUS_LOG(LOG_VERB, "[safievoice] Get info of session\n");
+		gint64 first_in_rtp_time = session->first_in_rtp_time;
+		gint64 last_in_rtp_time = session->last_in_rtp_time;
+		gint64 first_out_rtp_time = session->first_out_rtp_time;
+		gint64 last_out_rtp_time = session->last_out_rtp_time;
 		gint64 now = janus_get_monotonic_time();
+		gint64 time_from_first_in = (first_in_rtp_time == 0) ? 0 : now - first_in_rtp_time;
+		gint64 time_from_last_in = (last_in_rtp_time == 0) ? 0 : now - last_in_rtp_time;
+		gint64 time_from_first_out = (first_out_rtp_time == 0) ? 0 : now - first_out_rtp_time;
+		gint64 time_from_last_out = (last_out_rtp_time == 0) ? 0 : now - last_out_rtp_time;
+
 		json_t *event = json_object();
 		json_object_set_new(event, "safievoice", json_string("info"));
 		if (session->started) {
@@ -989,13 +998,8 @@ struct janus_plugin_result *janus_safievoice_handle_message(janus_plugin_session
 		json_object_set_new(download, "skiped_rtp_cnt", json_integer(session->skiped_in_rtp_cnt));
 		json_object_set_new(download, "overlatency_rtp_cnt", json_integer(session->overlatency_in_rtp_cnt));
 		json_object_set_new(download, "cur_latency", json_integer(session->cur_in_latency));
-		if (session->first_in_rtp_time == 0) {
-			json_object_set_new(download, "time_from_first", json_integer(0));
-			json_object_set_new(download, "time_from_last", json_integer(0));
-		} else {
-			json_object_set_new(download, "time_from_first", json_integer(now - session->first_in_rtp_time));
-			json_object_set_new(download, "time_from_last", json_integer(now - session->last_in_rtp_time));
-		}
+		json_object_set_new(download, "time_from_first", json_integer(time_from_first_in));
+		json_object_set_new(download, "time_from_last", json_integer(time_from_last_in));
 		json_object_set_new(event, "download", download);
 
 		/* info of out rtp */
@@ -1005,13 +1009,8 @@ struct janus_plugin_result *janus_safievoice_handle_message(janus_plugin_session
 		json_object_set_new(upload, "skiped_rtp_cnt", json_integer(session->skiped_out_rtp_cnt));
 		json_object_set_new(upload, "overlatency_rtp_cnt", json_integer(session->overlatency_out_rtp_cnt));
 		json_object_set_new(upload, "cur_latency", json_integer(session->cur_out_latency));
-		if (session->first_out_rtp_time == 0) {
-			json_object_set_new(upload, "time_from_first", json_integer(0));
-			json_object_set_new(upload, "time_from_last", json_integer(0));
-		} else {
-			json_object_set_new(upload, "time_from_first", json_integer(now - session->first_out_rtp_time));
-			json_object_set_new(upload, "time_from_last", json_integer(now - session->last_out_rtp_time));
-		}
+		json_object_set_new(download, "time_from_first", json_integer(time_from_first_out));
+		json_object_set_new(download, "time_from_last", json_integer(time_from_last_out));
 		json_object_set_new(event, "upload", upload);
 
 		return janus_plugin_result_new(JANUS_PLUGIN_OK, NULL, event);
