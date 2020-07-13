@@ -1009,8 +1009,8 @@ struct janus_plugin_result *janus_safievoice_handle_message(janus_plugin_session
 		json_object_set_new(upload, "skiped_rtp_cnt", json_integer(session->skiped_out_rtp_cnt));
 		json_object_set_new(upload, "overlatency_rtp_cnt", json_integer(session->overlatency_out_rtp_cnt));
 		json_object_set_new(upload, "cur_latency", json_integer(session->cur_out_latency));
-		json_object_set_new(download, "time_from_first", json_integer(time_from_first_out));
-		json_object_set_new(download, "time_from_last", json_integer(time_from_last_out));
+		json_object_set_new(upload, "time_from_first", json_integer(time_from_first_out));
+		json_object_set_new(upload, "time_from_last", json_integer(time_from_last_out));
 		json_object_set_new(event, "upload", upload);
 
 		return janus_plugin_result_new(JANUS_PLUGIN_OK, NULL, event);
