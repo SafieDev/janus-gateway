@@ -312,6 +312,8 @@ typedef struct janus_safievoice_session {
 	OpusDecoder *decoder;
 	int opus_pt;
 	int record_seq;
+	uint32_t last_hl_ts;
+	uint32_t ts_reset_cnt;
 	gint64 record_start_time;
 
     gint64 first_in_rtp_time;
@@ -805,6 +807,9 @@ void janus_safievoice_create_session(janus_plugin_session *handle, int *error) {
     session->overlatency_in_rtp_cnt = 0;
 	session->cur_in_latency = 0;
 
+	session->last_hl_ts = 0;
+	session->ts_reset_cnt = 0;
+
 	session->first_out_rtp_time = 0;
 	session->last_out_rtp_time = 0;
     session->total_out_rtp_cnt = 0;
@@ -1094,7 +1099,15 @@ void janus_safievoice_incoming_rtp(janus_plugin_session *handle, janus_plugin_rt
     gint64 buffering_latency = buffering_frames_num * INCOMING_FRAME_USEC;
 
     uint32_t hl_timestamp = ntohl(rtp->timestamp);
-    gint64 expect_time = session->first_in_rtp_time + (((gint64)hl_timestamp / INCOMING_FRAME_SAMPLE_NUM) * INCOMING_FRAME_USEC);
+	if (session->last_hl_ts > hl_timestamp) {
+		session->ts_reset_cnt ++;
+        JANUS_LOG(LOG_ERR, "rtp timestamp reset, seq=%d, timestamp=0x%x, last_ts=%d, cur_ts=%d, ts_reset_cnt=%d\n",
+            seq, rtp->timestamp, session->last_hl_ts, hl_timestamp, session->ts_reset_cnt);
+	}
+	session->last_hl_ts = hl_timestamp;
+
+	gint64 total_timestamp =  (gint64)hl_timestamp + ((gint64)session->ts_reset_cnt * UINT32_MAX);
+    gint64 expect_time = session->first_in_rtp_time + ((total_timestamp / INCOMING_FRAME_SAMPLE_NUM) * INCOMING_FRAME_USEC);
     gint64 incoming_latency = rtp_time - expect_time;
 
     gint64 total_latency = buffering_latency + incoming_latency + PLAYBACK_LATENCY_IN_USEC;
@@ -1114,13 +1127,14 @@ void janus_safievoice_incoming_rtp(janus_plugin_session *handle, janus_plugin_rt
         if ((session->overlatency_in_rtp_cnt % skip_base) < skip_num) {
             session->skiped_in_rtp_cnt ++;
 
-            JANUS_LOG(LOG_ERR, "Skip rtp->{seq=%d, ts=0x%f,0x%f}, skiped->{total:to=%ld:%ld:%ld}, latency->(%"G_GINT64_FORMAT"=%"G_GINT64_FORMAT"+%"G_GINT64_FORMAT") > %d ms, skip(lvl%d) rate=%lf\n",
+            JANUS_LOG(LOG_ERR, "Skip rtp->{seq=%d, ts=0x%x,0x%x,%"G_GINT64_FORMAT"}, skiped->{%ld:%ld:%ld}, latency->(%"G_GINT64_FORMAT"=%"G_GINT64_FORMAT"+%"G_GINT64_FORMAT") > %d ms, skip(lvl%d) rate=%lf\n",
                       seq,
 					  hl_timestamp,
 					  rtp->timestamp,
-                      (long int)session->skiped_in_rtp_cnt,
+					  total_timestamp,
                       (long int)session->total_in_rtp_cnt,
                       (long int)session->overlatency_in_rtp_cnt,
+                      (long int)session->skiped_in_rtp_cnt,
                       total_latency,
                       incoming_latency,
                       buffering_latency,
