@@ -1100,9 +1100,15 @@ void janus_safievoice_incoming_rtp(janus_plugin_session *handle, janus_plugin_rt
 
     uint32_t hl_timestamp = ntohl(rtp->timestamp);
 	if (session->last_hl_ts > hl_timestamp) {
-		session->ts_reset_cnt ++;
-        JANUS_LOG(LOG_ERR, "rtp timestamp reset, seq=%d, timestamp=0x%x, last_ts=%d, cur_ts=%d, ts_reset_cnt=%d\n",
-            seq, rtp->timestamp, session->last_hl_ts, hl_timestamp, session->ts_reset_cnt);
+		/* The new timestamp is smaller than the last one, is it a timestamp reset or simply out of order? */
+		if(session->last_hl_ts - ntohl(rtp->timestamp) > 2*1000*1000*1000) {
+			session->ts_reset_cnt ++;
+			JANUS_LOG(LOG_ERR, "rtp timestamp reset, seq=%d, timestamp=0x%x, last_ts=%d, cur_ts=%d, ts_reset_cnt=%d\n",
+				seq, rtp->timestamp, session->last_hl_ts, hl_timestamp, session->ts_reset_cnt);
+		} else {
+			JANUS_LOG(LOG_ERR, "rtp timestamp out of order, seq=%d, timestamp=0x%x, last_ts=%d, cur_ts=%d\n",
+				seq, rtp->timestamp, session->last_hl_ts, hl_timestamp);
+		}
 	}
 	session->last_hl_ts = hl_timestamp;
 
