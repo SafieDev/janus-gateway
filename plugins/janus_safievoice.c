@@ -248,6 +248,8 @@ struct janus_plugin_result *janus_safievoice_handle_message(janus_plugin_session
 void janus_safievoice_setup_media(janus_plugin_session *handle);
 void janus_safievoice_incoming_rtp(janus_plugin_session *handle, janus_plugin_rtp *packet);
 void janus_safievoice_incoming_rtcp(janus_plugin_session *handle, janus_plugin_rtcp *packet);
+void janus_safievoice_incoming_data(janus_plugin_session *handle, janus_plugin_data *packet);
+void janus_safievoice_data_ready(janus_plugin_session *handle);
 void janus_safievoice_slow_link(janus_plugin_session *handle, int uplink, int video);
 void janus_safievoice_hangup_media(janus_plugin_session *handle);
 void janus_safievoice_destroy_session(janus_plugin_session *handle, int *error);
@@ -272,6 +274,8 @@ static janus_plugin janus_safievoice_plugin =
 		.setup_media = janus_safievoice_setup_media,
 		.incoming_rtp = janus_safievoice_incoming_rtp,
 		.incoming_rtcp = janus_safievoice_incoming_rtcp,
+		.incoming_data = janus_safievoice_incoming_data,
+		.data_ready = janus_safievoice_data_ready,
 		.slow_link = janus_safievoice_slow_link,
 		.hangup_media = janus_safievoice_hangup_media,
 		.destroy_session = janus_safievoice_destroy_session,
@@ -1228,6 +1232,71 @@ void janus_safievoice_incoming_rtcp(janus_plugin_session *handle, janus_plugin_r
 	/* FIXME Should we care? */
 }
 
+void janus_safievoice_incoming_data(janus_plugin_session *handle, janus_plugin_data *packet) {
+	if(handle == NULL || g_atomic_int_get(&handle->stopped) || g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized))
+		return;
+	/* Simple echo test */
+	if(gateway) {
+		janus_safievoice_session *session = (janus_safievoice_session *)handle->plugin_handle;
+		if(!session) {
+			JANUS_LOG(LOG_ERR, "No session associated with this handle...\n");
+			return;
+		}
+		if(g_atomic_int_get(&session->destroyed))
+			return;
+		if(packet->buffer == NULL || packet->length == 0)
+			return;
+		char *label = packet->label;
+		char *buf = packet->buffer;
+		uint16_t len = packet->length;
+		if(packet->binary) {
+			JANUS_LOG(LOG_WARN, "Got a binary DataChannel message (label=%s, %d bytes) to bounce back\n", label, len);
+
+			// todo send to safie app
+			/* Binary data, shoot back as it is */
+			gateway->relay_data(handle, packet);
+			return;
+		}
+		/* Text data */
+		char *text = g_malloc(len+1);
+		memcpy(text, buf, len);
+		*(text+len) = '\0';
+		JANUS_LOG(LOG_VERB, "Got a DataChannel message (label=%s, %zu bytes) to bounce back: %s\n", label, strlen(text), text);
+
+		/* We send back the text to safie app */
+		json_t *event = json_object();
+		json_object_set_new(event, "safievoice", json_string("data"));
+		json_object_set_new(event, "label", json_string(label));
+		json_object_set_new(event, "text", json_string(text));
+		int ret = gateway->push_event(handle, &janus_safievoice_plugin, NULL, event, NULL);
+		JANUS_LOG(LOG_VERB, "  >> Pushing event: %d (%s)\n", ret, janus_get_api_error(ret));
+		json_decref(event);
+
+		/* We send back the same text with a custom prefix */
+		const char *prefix = "Safie VoiceCall here! You wrote: ";
+		char *reply = g_malloc(strlen(prefix)+len+1);
+		g_snprintf(reply, strlen(prefix)+len+1, "%s%s", prefix, text);
+		g_free(text);
+		/* Prepare the packet and send it back */
+		janus_plugin_data r = {
+			.label = label,
+			.binary = FALSE,
+			.buffer = reply,
+			.length = strlen(reply)
+		};
+		gateway->relay_data(handle, &r);
+		g_free(reply);
+	}
+}
+
+void janus_safievoice_data_ready(janus_plugin_session *handle) {
+	if(handle == NULL || g_atomic_int_get(&handle->stopped) ||
+			g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized) || !gateway)
+		return;
+	/* Data channels are writable */
+	JANUS_LOG(LOG_VERB, "Data channels are writable...\n");
+}
+
 void janus_safievoice_slow_link(janus_plugin_session *handle, int uplink, int video) {
 	/* The core is informing us that our peer got or sent too many NACKs, are we pushing media too hard? */
 	if(handle == NULL || g_atomic_int_get(&handle->stopped) || g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized))
@@ -1461,6 +1530,20 @@ static void *janus_safievoice_handler(void *data) {
 				opus_pt,						/* Opus payload type */
 				opus_pt                         /* Opus payload type */);
 
+#ifdef HAVE_SCTP
+			gboolean has_data_channel = (strstr(msg_sdp, "DTLS/SCTP") && !strstr(msg_sdp, " 0 DTLS/SCTP") &&
+				!strstr(msg_sdp, " 0 UDP/DTLS/SCTP")) ? 1 : 0;	/* FIXME This is a really hacky way of checking... */
+			if(has_data_channel) {
+				/* Add data line */
+				gchar buffer[512];
+				memset(buffer, 0, 512);
+				g_snprintf(buffer, 512,
+					"m=application 1 UDP/DTLS/SCTP webrtc-datachannel\r\n"
+					"c=IN IP4 1.1.1.1\r\n"
+					"a=sctp-port:5000\r\n");
+				g_strlcat(sdp, buffer, 2048);
+			}
+#endif
 			/* Did the peer negotiate video? */
 			if(strstr(msg_sdp, "m=video") != NULL) {
 				/* If so, reject it */
