@@ -1272,20 +1272,16 @@ void janus_safievoice_incoming_data(janus_plugin_session *handle, janus_plugin_d
 		JANUS_LOG(LOG_VERB, "  >> Pushing event: %d (%s)\n", ret, janus_get_api_error(ret));
 		json_decref(event);
 
-		/* We send back the same text with a custom prefix */
-		const char *prefix = "Safie VoiceCall here! You wrote: ";
-		char *reply = g_malloc(strlen(prefix)+len+1);
-		g_snprintf(reply, strlen(prefix)+len+1, "%s%s", prefix, text);
-		g_free(text);
+		/* We send back the same text */
 		/* Prepare the packet and send it back */
 		janus_plugin_data r = {
 			.label = label,
 			.binary = FALSE,
-			.buffer = reply,
-			.length = strlen(reply)
+			.buffer = text,
+			.length = strlen(text)
 		};
 		gateway->relay_data(handle, &r);
-		g_free(reply);
+		g_free(text);
 	}
 }
 
