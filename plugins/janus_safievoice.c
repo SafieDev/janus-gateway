@@ -2382,7 +2382,7 @@ static void janus_safievoice_relay_rtp_packet(
 	/* Set the payload type */
 	packet->data->type = session->opus_pt;
 
-	packet->data->seq_number = session->record_seq;
+	packet->data->seq_number = htons(session->record_seq);
 	session->record_seq++;
 	if (packet->data->seq_number == 0) {
 		session->record_start_time = janus_get_monotonic_time();
