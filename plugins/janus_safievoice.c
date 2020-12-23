@@ -1271,7 +1271,7 @@ void janus_safievoice_incoming_data(janus_plugin_session *handle, janus_plugin_d
 		int ret = gateway->push_event(handle, &janus_safievoice_plugin, NULL, event, NULL);
 		JANUS_LOG(LOG_VERB, "  >> Pushing event: %d (%s)\n", ret, janus_get_api_error(ret));
 		json_decref(event);
-
+#if 0
 		/* We send back the same text */
 		/* Prepare the packet and send it back */
 		janus_plugin_data r = {
@@ -1281,6 +1281,7 @@ void janus_safievoice_incoming_data(janus_plugin_session *handle, janus_plugin_d
 			.length = strlen(text)
 		};
 		gateway->relay_data(handle, &r);
+#endif
 		g_free(text);
 	}
 }
