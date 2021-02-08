@@ -216,7 +216,11 @@ static struct janus_safievoice_latency_skip_param {
 #else
 #define RECORD_SAMPLE_RATE           (8000)
 #endif
+#if defined(RECORD_DEVICE_CHANNEL_NUM)
+#define RECORD_CHANNEL_NUM           (RECORD_DEVICE_CHANNEL_NUM)
+#else
 #define RECORD_CHANNEL_NUM           (1)
+#endif
 #define RECORD_MSEC_PER_FRAME        (60)
 #define RECORD_USEC_PER_FRAME        (RECORD_MSEC_PER_FRAME*USEC_PER_MSEC)
 #define RECORD_SAMPLE_PER_FRAME      (RECORD_MSEC_PER_FRAME*RECORD_SAMPLE_RATE/MSEC_PER_SEC)                      /* 60 ms/frame */
@@ -528,18 +532,6 @@ static GAsyncQueue *encoder_request_queue = NULL;
 static GThread *uploader_thread;
 static void *janus_safievoice_uploader(void *data);
 static GAsyncQueue *uploader_request_queue = NULL;
-
-/* SDP offer/answer template */
-#define sdp_template \
-		"v=0\r\n" \
-		"o=- %"SCNu64" %"SCNu64" IN IP4 127.0.0.1\r\n"	/* We need current time here */ \
-		"s=SafieVoice %"SCNu64"\r\n"						/* SafieVoice recording ID */ \
-		"t=0 0\r\n" \
-		"m=audio 1 RTP/SAVPF %d\r\n"		/* Opus payload type */ \
-		"c=IN IP4 1.1.1.1\r\n" \
-		"a=rtpmap:%d opus/48000/2\r\n"		/* Opus payload type */ \
-		"a=sendrecv\r\n"					/* This plugin doesn't send any frames */
-
 
 /* Error codes */
 #define JANUS_SAFIEVOICE_ERROR_UNKNOWN_ERROR		499
@@ -1520,7 +1512,15 @@ static void *janus_safievoice_handler(void *data) {
 			int opus_pt = janus_get_codec_pt(msg_sdp, "opus");
 			session->opus_pt = opus_pt;
 			JANUS_LOG(LOG_VERB, "Opus payload type is %d\n", opus_pt);
-			g_snprintf(sdp, 1024, sdp_template,
+			g_snprintf(sdp, 1024, 
+				"v=0\r\n" \
+				"o=- %"SCNu64" %"SCNu64" IN IP4 127.0.0.1\r\n"	/* We need current time here */ \
+				"s=SafieVoice %"SCNu64"\r\n"						/* SafieVoice recording ID */ \
+				"t=0 0\r\n" \
+				"m=audio 1 RTP/SAVPF %d\r\n"		/* Opus payload type */ \
+				"c=IN IP4 1.1.1.1\r\n" \
+				"a=rtpmap:%d opus/48000/2\r\n"		/* Opus payload type */ \
+				"a=sendrecv\r\n"					/* This plugin doesn't send any frames */,
 				session->sdp_sessid,
 				session->sdp_version,
 				session->recording_id,			/* Recording ID */
