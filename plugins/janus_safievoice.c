@@ -129,12 +129,12 @@
 #include "../utils.h"
 
 /* Plugin information */
-#define JANUS_SAFIEVOICE_VERSION			7
+#define JANUS_SAFIEVOICE_VERSION		7
 #define JANUS_SAFIEVOICE_VERSION_STRING	"0.0.7"
-#define JANUS_SAFIEVOICE_DESCRIPTION		"This is a plugin implementing a very simple SafieVoice service for Janus."
+#define JANUS_SAFIEVOICE_DESCRIPTION	"This is a plugin implementing a very simple SafieVoice service for Janus."
 #define JANUS_SAFIEVOICE_NAME			"JANUS SafieVoice plugin"
 #define JANUS_SAFIEVOICE_AUTHOR			"Meetecho s.r.l."
-#define JANUS_SAFIEVOICE_PACKAGE			"janus.plugin.safievoice"
+#define JANUS_SAFIEVOICE_PACKAGE		"janus.plugin.safievoice"
 
 #define ARRAY_OF(a)               (sizeof(a) / sizeof(a[0]))
 #define MSEC_PER_SEC              (1000)
@@ -221,7 +221,11 @@ static struct janus_safievoice_latency_skip_param {
 #else
 #define RECORD_CHANNEL_NUM           (1)
 #endif
+#if defined(CUSTOM_RECORD_MSEC_PER_FRAME)
+#define RECORD_MSEC_PER_FRAME        (CUSTOM_RECORD_MSEC_PER_FRAME)
+#else
 #define RECORD_MSEC_PER_FRAME        (60)
+#endif
 #define RECORD_USEC_PER_FRAME        (RECORD_MSEC_PER_FRAME*USEC_PER_MSEC)
 #define RECORD_SAMPLE_PER_FRAME      (RECORD_MSEC_PER_FRAME*RECORD_SAMPLE_RATE/MSEC_PER_SEC)                      /* 60 ms/frame */
 #define RECORD_SAMPLE_SIZE           sizeof(opus_int16)
@@ -1517,15 +1521,23 @@ static void *janus_safievoice_handler(void *data) {
 				"o=- %"SCNu64" %"SCNu64" IN IP4 127.0.0.1\r\n"	/* We need current time here */ \
 				"s=SafieVoice %"SCNu64"\r\n"						/* SafieVoice recording ID */ \
 				"t=0 0\r\n" \
+				"%s\r\n" \
 				"m=audio 1 RTP/SAVPF %d\r\n"		/* Opus payload type */ \
 				"c=IN IP4 1.1.1.1\r\n" \
 				"a=rtpmap:%d opus/48000/2\r\n"		/* Opus payload type */ \
-				"a=sendrecv\r\n"					/* This plugin doesn't send any frames */,
+				"a=sendrecv\r\n"					/* This plugin doesn't send any frames */
+				,
 				session->sdp_sessid,
 				session->sdp_version,
 				session->recording_id,			/* Recording ID */
+#if defined(SAFIEVOICE_SUPPORT_AUDIO_LEVEL)
+				"a=extmap:1 " JANUS_RTP_EXTMAP_AUDIO_LEVEL,
+#else
+				"",
+#endif
 				opus_pt,						/* Opus payload type */
-				opus_pt                         /* Opus payload type */);
+				opus_pt                         /* Opus payload type */
+				);
 
 #ifdef HAVE_SCTP
 			gboolean has_data_channel = (strstr(msg_sdp, "DTLS/SCTP") && !strstr(msg_sdp, " 0 DTLS/SCTP") &&
@@ -2403,8 +2415,13 @@ static void janus_safievoice_relay_rtp_packet(
 		rtp.video = FALSE;
 		rtp.buffer = (char*)packet->data;
 		rtp.length = packet->length;
+#if defined(SAFIEVOICE_SUPPORT_AUDIO_LEVEL)
+		rtp.extensions.audio_level = 20;
+		rtp.extensions.audio_level_vad = 1;
+#else
 		rtp.extensions.audio_level = -1;
 		rtp.extensions.audio_level_vad = 1;
+#endif
 		rtp.extensions.video_rotation = -1;
 		rtp.extensions.video_back_camera = FALSE;
 		rtp.extensions.video_flipped = FALSE;
