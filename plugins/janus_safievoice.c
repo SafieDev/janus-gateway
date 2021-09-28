@@ -875,8 +875,19 @@ void janus_safievoice_destroy_session(janus_plugin_session *handle, int *error) 
 		*error = -2;
 		return;
 	}
-	JANUS_LOG(LOG_VERB, "Removing SafieVoice session...\n");
+	JANUS_LOG(LOG_WARN, "Removing SafieVoice session...\n");
 	janus_safievoice_hangup_media_internal(handle);
+
+	if (session->first_in_rtp_time != 0) {
+		g_async_queue_push(recorder_request_queue, &recorder_close_message);
+	}
+
+	JANUS_LOG(LOG_WARN, "drop all decoded PCM buffer(len=%d)\n",
+		g_async_queue_length(player_request_queue));
+	janus_safievoice_player_request_message *player_request_msg = NULL;
+	while((player_request_msg = g_async_queue_try_pop(player_request_queue)) != NULL) {
+		janus_safievoice_player_request_message_free(player_request_msg);
+	}
 
 	g_async_queue_push(player_request_queue, &player_close_message);
 
@@ -889,9 +900,6 @@ void janus_safievoice_destroy_session(janus_plugin_session *handle, int *error) 
 	JANUS_LOG(LOG_ERR, "closed player! msg=%p, ok=%p\n",
 		msg, &player_close_succeeded);
 
-	if (session->first_in_rtp_time != 0) {
-		g_async_queue_push(recorder_request_queue, &recorder_close_message);
-	}
 
 #if defined(DUMP_RAW_PCM)
     if (session->opus_fd >= 0) {
@@ -2173,6 +2181,23 @@ static void *janus_safievoice_player(void *data) {
             if (ret < 0) {
                 JANUS_LOG(LOG_WARN, "[player thread] playback failed, ret=%d\n", ret);
 				pcm_speaker_close();
+
+				sleep(1); // wait for audio ready
+
+				JANUS_LOG(LOG_WARN, "[player thread] drop all decoded PCM buffer(len=%d)\n",
+					g_async_queue_length(player_request_queue));
+				janus_safievoice_player_request_message *player_request_msg = NULL;
+				while((player_request_msg = g_async_queue_try_pop(player_request_queue)) != NULL) {
+					if (player_request_msg == &player_close_message)
+					{
+						JANUS_LOG(LOG_WARN, "[player thread] received close msg when drop all decoded PCM buffer\n");
+						/* response to main thread */
+						g_async_queue_push(player_response_queue, &player_close_succeeded);
+						continue;
+					}
+
+					janus_safievoice_player_request_message_free(player_request_msg);
+				}
             }
 
             long int done_time = janus_get_monotonic_time();
@@ -2285,6 +2310,7 @@ static void *janus_safievoice_recorder(void *data) {
 				janus_safievoice_record_message_alloc();
 			if (pcm_recorder_record(record_job->pcm_buf, 
 									record_job->sample_num) != 0) {
+				sleep(1);   /* wait for audio ready */
 				//JANUS_LOG(LOG_ERR, "[record] failed to record\n");
 				janus_safievoice_record_message_free(record_job);
 				continue;
