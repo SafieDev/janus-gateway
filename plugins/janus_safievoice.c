@@ -1422,6 +1422,10 @@ static void *janus_safievoice_handler(void *data) {
 					JANUS_LOG(LOG_ERR, "%s\n", error_cause);
 					goto error;
 				}
+#ifdef PLAYBACK_OPUS_DECODE_GAIN
+				opus_int32 gain = PLAYBACK_OPUS_DECODE_GAIN;
+				opus_decoder_ctl(session->decoder, OPUS_SET_GAIN(gain));
+#endif
 #if defined(DUMP_RAW_PCM)
 				session->opus_fd = open(session->opus_filename, 
 										O_CREAT | O_TRUNC | O_RDWR);
