@@ -2294,6 +2294,7 @@ static void *janus_safievoice_recorder(void *data) {
     JANUS_LOG(LOG_WARN, "SafieVoice recorder thread started\n");
 
 	guint session_num = 0;
+	gint64 start_time = 0;
     while(g_atomic_int_get(&initialized) && !g_atomic_int_get(&stopping)) {
 		if (session_num == 0) {
 			msg = g_async_queue_timeout_pop(recorder_request_queue, NO_MEDIA_TIMEOUT);
@@ -2315,8 +2316,15 @@ static void *janus_safievoice_recorder(void *data) {
 				janus_safievoice_record_message_free(record_job);
 				continue;
 			}
-			record_job->recorded_time = janus_get_monotonic_time();
-
+			guint64 now = janus_get_monotonic_time();
+#ifdef RECORD_IGNORE_FIRST_MSEC
+			if (start_time > 0 && now < start_time + RECORD_IGNORE_FIRST_MSEC * 1000) {
+				janus_safievoice_record_message_free(record_job);
+				//JANUS_LOG(LOG_WARN, "ignore head %d ms\n", RECORD_IGNORE_FIRST_MSEC);
+				continue;
+			}
+#endif
+			record_job->recorded_time = now;
 			// encode
 			g_async_queue_push(encoder_request_queue, record_job);
         } else if(msg == &recorder_exit_message) {
@@ -2324,6 +2332,11 @@ static void *janus_safievoice_recorder(void *data) {
             break;
         } else if (msg == &recorder_open_message) {
 			JANUS_LOG(LOG_WARN, "[recorder thread] received open msg\n");
+#ifdef RECORD_IGNORE_FIRST_MSEC
+			if (session_num == 0) {
+				start_time = janus_get_monotonic_time();
+			}
+#endif
 			session_num ++;
 		} else if (msg == &recorder_close_message) {
 			JANUS_LOG(LOG_WARN, "[recorder thread] received close msg, session_num=%d\n", session_num);
