@@ -1,4 +1,4 @@
-AC_INIT([Janus WebRTC Server],[0.10.2],[https://github.com/meetecho/janus-gateway],[janus-gateway],[https://janus.conf.meetecho.com])
+AC_INIT([Janus WebRTC Server],[0.11.7],[https://github.com/meetecho/janus-gateway],[janus-gateway],[https://janus.conf.meetecho.com])
 AC_LANG(C)
 AC_CONFIG_AUX_DIR([.])
 AC_CONFIG_MACRO_DIR([m4])
@@ -51,11 +51,17 @@ CFLAGS="$CFLAGS \
 	-Wstrict-prototypes \
 	-Wswitch-default \
 	-Wunused \
-	-Wwrite-strings"
+	-Wwrite-strings \
+	-Werror=implicit-function-declaration"
 
 case "$CC" in
-clang*)
+*clang*)
 	# Specific clang flags
+	CFLAGS="$CFLAGS \
+		-Wno-cast-align \
+		-Wno-initializer-overrides"
+;;
+cc*)
 	CFLAGS="$CFLAGS \
 		-Wno-cast-align \
 		-Wno-initializer-overrides"
@@ -69,9 +75,9 @@ clang*)
 		-Wunused-but-set-variable"
 esac
 
-JANUS_VERSION=102
+JANUS_VERSION=117
 AC_SUBST(JANUS_VERSION)
-JANUS_VERSION_STRING="0.10.2"
+JANUS_VERSION_STRING="0.11.7"
 AC_SUBST(JANUS_VERSION_STRING)
 
 case "$host_os" in
@@ -81,6 +87,12 @@ darwin*)
 	LDFLAGS="$LDFLAGS -Wl,-export_dynamic"
 	LDFLAGS="$LDFLAGS -L/usr/local/lib -L/usr/local/opt/openssl/lib -L/opt/local/lib -L/usr/local/libsrtp/lib"
 	AM_CONDITIONAL([DARWIN_OS], true)
+;;
+freebsd*)
+	CFLAGS="$CFLAGS -I/usr/include/openssl"
+	LDFLAGS="$LDFLAGS -Xlinker --export-dynamic"
+	LDFLAGS="$LDFLAGS -L/usr/lib/openssl -lcrypto -lssl -L/usr/local/lib"
+	AM_CONDITIONAL([DARWIN_OS], false)
 ;;
 *)
 	LDFLAGS="$LDFLAGS -Wl,--export-dynamic"
@@ -338,17 +350,27 @@ AC_ARG_ENABLE([systemd-sockets],
               [],
               [enable_systemd_sockets=no])
 
-PKG_CHECK_MODULES([JANUS],
-                  [
-                    glib-2.0 >= $glib_version
+case "$host_os" in
+freebsd*)
+	PKGCHECKMODULES="glib-2.0 >= $glib_version
+                    gio-2.0 >= $glib_version
+                    libconfig
+                    nice
+                    jansson >= $jansson_version
+                    zlib"
+;;
+*)
+	PKGCHECKMODULES="glib-2.0 >= $glib_version
                     gio-2.0 >= $glib_version
                     libconfig
                     nice
                     jansson >= $jansson_version
                     libssl >= $ssl_version
                     libcrypto
-                    zlib
-                  ])
+                    zlib"
+esac
+PKG_CHECK_MODULES([JANUS],"$PKGCHECKMODULES")
+
 JANUS_MANUAL_LIBS="${JANUS_MANUAL_LIBS} -lm"
 AC_SUBST(JANUS_MANUAL_LIBS)
 
@@ -395,6 +417,18 @@ AC_CHECK_LIB([nice],
              [nice_address_equal_no_port],
              [AC_DEFINE(HAVE_LIBNICE_TCP)],
              [AC_MSG_NOTICE([libnice version does not support TCP candidates])]
+             )
+
+AC_CHECK_LIB([nice],
+             [nice_agent_close_async],
+             [AC_DEFINE(HAVE_CLOSE_ASYNC)],
+             [AC_MSG_NOTICE([libnice version does not have nice_agent_close_async])]
+             )
+
+AC_CHECK_LIB([nice],
+             [nice_agent_new_full],
+             [AC_DEFINE(HAVE_ICE_NOMINATION)],
+             [AC_MSG_NOTICE([libnice version does not have nice_agent_new_full])]
              )
 
 AC_CHECK_LIB([dl],
@@ -524,6 +558,13 @@ PKG_CHECK_MODULES([MHD],
 AC_SUBST([MHD_CFLAGS])
 AC_SUBST([MHD_LIBS])
 AM_CONDITIONAL([ENABLE_REST], [test "x$enable_rest" = "xyes"])
+AM_COND_IF([ENABLE_REST],
+           [
+             AC_CHECK_TYPES([enum MHD_Result],
+                            [],
+                            [],
+                            [#include <microhttpd.h>])
+           ])
 
 AC_CHECK_LIB([websockets],
 			 [lws_create_vhost],
@@ -541,6 +582,7 @@ AC_CHECK_LIB([websockets],
                AS_IF([test "x$enable_websockets_event_handler" != "xno"],
                [
                  AC_DEFINE(HAVE_WSEVH)
+                 WS_MANUAL_LIBS="-lwebsockets"
                  enable_websockets_event_handler=yes
                ])
 			 ],
@@ -565,6 +607,7 @@ AC_CHECK_LIB([rabbitmq],
                  AC_DEFINE(HAVE_RABBITMQEVH)
                  enable_rabbitmq_event_handler=yes
                ])
+               AC_CHECK_HEADERS([rabbitmq-c/amqp.h])
              ],
              [
                AS_IF([test "x$enable_rabbitmq" = "xyes"],
@@ -921,6 +964,8 @@ AS_IF([test "x$enable_post_processing" = "xyes"],
                          [
                            glib-2.0 >= $glib_version
                            jansson >= $jansson_version
+                           libssl >= $ssl_version
+                           libcrypto
                            libavutil
                            libavcodec
                            libavformat

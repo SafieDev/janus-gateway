@@ -41,6 +41,11 @@
 #define __BYTE_ORDER BYTE_ORDER
 #define __BIG_ENDIAN BIG_ENDIAN
 #define __LITTLE_ENDIAN LITTLE_ENDIAN
+#elif defined(__FreeBSD__)
+#include <sys/endian.h>
+#define __BYTE_ORDER BYTE_ORDER
+#define __BIG_ENDIAN BIG_ENDIAN
+#define __LITTLE_ENDIAN LITTLE_ENDIAN
 #else
 #include <endian.h>
 #endif
@@ -265,7 +270,7 @@ int janus_text2pcap_dump(janus_text2pcap *instance,
 	gettimeofday(&tv, NULL);
 	strftime(timestamp, sizeof(timestamp), "%H:%M:%S", tm);
 	g_snprintf(usec, sizeof(usec), ".%06ld", tv.tv_usec);
-	g_strlcat(timestamp, usec, sizeof(timestamp));
+	janus_strlcat(timestamp, usec, sizeof(timestamp));
 	memset(buffer, 0, sizeof(buffer));
 	g_snprintf(buffer, sizeof(buffer), "%s %s 000000 ", incoming ? "I" : "O", timestamp);
 	int i=0;
@@ -273,10 +278,10 @@ int janus_text2pcap_dump(janus_text2pcap *instance,
 	for(i=0; i<stop; i++) {
 		memset(byte, 0, sizeof(byte));
 		g_snprintf(byte, sizeof(byte), " %02x", (unsigned char)buf[i]);
-		g_strlcat(buffer, byte, sizeof(buffer));
+		janus_strlcat(buffer, byte, sizeof(buffer));
 	}
-	g_strlcat(buffer, " ", sizeof(buffer));
-	g_strlcat(buffer, janus_text2pcap_packet_string(type), sizeof(buffer));
+	janus_strlcat(buffer, " ", sizeof(buffer));
+	janus_strlcat(buffer, janus_text2pcap_packet_string(type), sizeof(buffer));
 	if(format) {
 		/* This callback has variable arguments (error string) */
 		char custom[512];
@@ -284,10 +289,10 @@ int janus_text2pcap_dump(janus_text2pcap *instance,
 		va_start(ap, format);
 		g_vsnprintf(custom, sizeof(custom), format, ap);
 		va_end(ap);
-		g_strlcat(buffer, " ", sizeof(buffer));
-		g_strlcat(buffer, custom, sizeof(buffer));
+		janus_strlcat(buffer, " ", sizeof(buffer));
+		janus_strlcat(buffer, custom, sizeof(buffer));
 	}
-	g_strlcat(buffer, "\r\n", sizeof(buffer));
+	janus_strlcat(buffer, "\r\n", sizeof(buffer));
 	/* Save textified packet on file */
 	int temp = 0, buflen = strlen(buffer), tot = buflen;
 	while(tot > 0) {

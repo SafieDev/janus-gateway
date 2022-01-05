@@ -53,6 +53,8 @@ var sfutest = null;
 var opaqueId = "videoroomtest-"+Janus.randomString(12);
 
 var myroom = 1234;	// Demo room
+if(getQueryStringValue("room") !== "")
+	myroom = parseInt(getQueryStringValue("room"));
 var myusername = null;
 var myid = null;
 var mystream = null;
@@ -64,6 +66,10 @@ var bitrateTimer = [];
 
 var doSimulcast = (getQueryStringValue("simulcast") === "yes" || getQueryStringValue("simulcast") === "true");
 var doSimulcast2 = (getQueryStringValue("simulcast2") === "yes" || getQueryStringValue("simulcast2") === "true");
+var acodec = (getQueryStringValue("acodec") !== "" ? getQueryStringValue("acodec") : null);
+var vcodec = (getQueryStringValue("vcodec") !== "" ? getQueryStringValue("vcodec") : null);
+var doDtx = (getQueryStringValue("dtx") === "yes" || getQueryStringValue("dtx") === "true");
+var subscriber_mode = (getQueryStringValue("subscriber-mode") === "yes" || getQueryStringValue("subscriber-mode") === "true");
 
 $(document).ready(function() {
 	// Initialize the library (all console debuggers enabled)
@@ -162,7 +168,12 @@ $(document).ready(function() {
 											myid = msg["id"];
 											mypvtid = msg["private_id"];
 											Janus.log("Successfully joined room " + msg["room"] + " with ID " + myid);
-											publishOwnFeed(true);
+											if(subscriber_mode) {
+												$('#videojoin').hide();
+												$('#videos').removeClass('hide').show();
+											} else {
+												publishOwnFeed(true);
+											}
 											// Any new feed to attach to?
 											if(msg["publishers"]) {
 												var list = msg["publishers"];
@@ -389,7 +400,7 @@ function registerUsername() {
 			ptype: "publisher",
 			display: username
 		};
-		myusername = username;
+		myusername = escapeXmlTags(username);
 		sfutest.send({ message: register });
 	}
 }
@@ -406,6 +417,13 @@ function publishOwnFeed(useAudio) {
 			// the following 'simulcast' property to pass to janus.js to true
 			simulcast: doSimulcast,
 			simulcast2: doSimulcast2,
+			customizeSdp: function(jsep) {
+				// If DTX is enabled, munge the SDP
+				if(doDtx) {
+					jsep.sdp = jsep.sdp
+						.replace("useinbandfec=1", "useinbandfec=1;usedtx=1")
+				}
+			},
 			success: function(jsep) {
 				Janus.debug("Got publisher SDP!", jsep);
 				var publish = { request: "configure", audio: useAudio, video: true };
@@ -418,7 +436,12 @@ function publishOwnFeed(useAudio) {
 				// a codec will only work if: (1) the codec is actually in the SDP (and
 				// so the browser supports it), and (2) the codec is in the list of
 				// allowed codecs in a room. With respect to the point (2) above,
-				// refer to the text in janus.plugin.videoroom.jcfg for more details
+				// refer to the text in janus.plugin.videoroom.jcfg for more details.
+				// We allow people to specify a codec via query string, for demo purposes
+				if(acodec)
+					publish["audiocodec"] = acodec;
+				if(vcodec)
+					publish["videocodec"] = vcodec;
 				sfutest.send({ message: publish, jsep: jsep });
 			},
 			error: function(error) {
@@ -507,7 +530,7 @@ function newRemoteFeed(id, display, audio, video) {
 							}
 						}
 						remoteFeed.rfid = msg["id"];
-						remoteFeed.rfdisplay = msg["display"];
+						remoteFeed.rfdisplay = escapeXmlTags(msg["display"]);
 						if(!remoteFeed.spinner) {
 							var target = document.getElementById('videoremote'+remoteFeed.rfindex);
 							remoteFeed.spinner = new Spinner({top:100}).spin(target);
@@ -517,14 +540,14 @@ function newRemoteFeed(id, display, audio, video) {
 						Janus.log("Successfully attached to feed " + remoteFeed.rfid + " (" + remoteFeed.rfdisplay + ") in room " + msg["room"]);
 						$('#remote'+remoteFeed.rfindex).removeClass('hide').html(remoteFeed.rfdisplay).show();
 					} else if(event === "event") {
-						// Check if we got an event on a simulcast-related event from this publisher
+						// Check if we got a simulcast-related event from this publisher
 						var substream = msg["substream"];
 						var temporal = msg["temporal"];
 						if((substream !== null && substream !== undefined) || (temporal !== null && temporal !== undefined)) {
 							if(!remoteFeed.simulcastStarted) {
 								remoteFeed.simulcastStarted = true;
 								// Add some new buttons
-								addSimulcastButtons(remoteFeed.rfindex, remoteFeed.videoCodec === "vp8" || remoteFeed.videoCodec === "h264");
+								addSimulcastButtons(remoteFeed.rfindex, remoteFeed.videoCodec === "vp8");
 							}
 							// We just received notice that there's been a switch, update the buttons
 							updateSimulcastButtons(remoteFeed.rfindex, substream, temporal);
@@ -535,6 +558,7 @@ function newRemoteFeed(id, display, audio, video) {
 				}
 				if(jsep) {
 					Janus.debug("Handling SDP as well...", jsep);
+					var stereo = (jsep.sdp.indexOf("stereo=1") !== -1);
 					// Answer and attach
 					remoteFeed.createAnswer(
 						{
@@ -542,6 +566,12 @@ function newRemoteFeed(id, display, audio, video) {
 							// Add data:true here if you want to subscribe to datachannels as well
 							// (obviously only works if the publisher offered them in the first place)
 							media: { audioSend: false, videoSend: false },	// We want recvonly audio/video
+							customizeSdp: function(jsep) {
+								if(stereo && jsep.sdp.indexOf("stereo=1") == -1) {
+									// Make sure that our offer contains stereo too
+									jsep.sdp = jsep.sdp.replace("useinbandfec=1", "useinbandfec=1;stereo=1");
+								}
+							},
 							success: function(jsep) {
 								Janus.debug("Got SDP!", jsep);
 								var body = { request: "start", room: myroom };
@@ -569,7 +599,7 @@ function newRemoteFeed(id, display, audio, video) {
 				if($('#remotevideo'+remoteFeed.rfindex).length === 0) {
 					addButtons = true;
 					// No remote video yet
-					$('#videoremote'+remoteFeed.rfindex).append('<video class="rounded centered" id="waitingvideo' + remoteFeed.rfindex + '" width=320 height=240 />');
+					$('#videoremote'+remoteFeed.rfindex).append('<video class="rounded centered" id="waitingvideo' + remoteFeed.rfindex + '" width="100%" height="100%" />');
 					$('#videoremote'+remoteFeed.rfindex).append('<video class="rounded centered relative hide" id="remotevideo' + remoteFeed.rfindex + '" width="100%" height="100%" autoplay playsinline/>');
 					$('#videoremote'+remoteFeed.rfindex).append(
 						'<span class="label label-primary hide" id="curres'+remoteFeed.rfindex+'" style="position: absolute; bottom: 0px; left: 0px; margin: 15px;"></span>' +
@@ -638,7 +668,7 @@ function newRemoteFeed(id, display, audio, video) {
 				$('#novideo'+remoteFeed.rfindex).remove();
 				$('#curbitrate'+remoteFeed.rfindex).remove();
 				$('#curres'+remoteFeed.rfindex).remove();
-				if(bitrateTimer[remoteFeed.rfindex] !== null && bitrateTimer[remoteFeed.rfindex] !== null)
+				if(bitrateTimer[remoteFeed.rfindex])
 					clearInterval(bitrateTimer[remoteFeed.rfindex]);
 				bitrateTimer[remoteFeed.rfindex] = null;
 				remoteFeed.simulcastStarted = false;
@@ -653,6 +683,15 @@ function getQueryStringValue(name) {
 	var regex = new RegExp("[\\?&]" + name + "=([^&#]*)"),
 		results = regex.exec(location.search);
 	return results === null ? "" : decodeURIComponent(results[1].replace(/\+/g, " "));
+}
+
+// Helper to escape XML tags
+function escapeXmlTags(value) {
+	if(value) {
+		var escapedValue = value.replace(new RegExp('<', 'g'), '&lt');
+		escapedValue = escapedValue.replace(new RegExp('>', 'g'), '&gt');
+		return escapedValue;
+	}
 }
 
 // Helpers to create Simulcast-related UI, if enabled
@@ -676,6 +715,12 @@ function addSimulcastButtons(feed, temporal) {
 		'	</div>' +
 		'</div>'
 	);
+	if(Janus.webRTCAdapter.browserDetails.browser !== "firefox") {
+		// Chromium-based browsers only have two temporal layers
+		$('#tl'+index+'-2').remove();
+		$('#tl'+index+'-1').css('width', '50%');
+		$('#tl'+index+'-0').css('width', '50%');
+	}
 	// Enable the simulcast selection buttons
 	$('#sl' + index + '-0').removeClass('btn-primary btn-success').addClass('btn-primary')
 		.unbind('click').click(function() {

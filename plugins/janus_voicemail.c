@@ -352,7 +352,7 @@ int janus_voicemail_init(janus_callbacks *callback, const char *config_path) {
 		int res = janus_mkdir(recordings_path, 0755);
 		JANUS_LOG(LOG_VERB, "Creating folder: %d\n", res);
 		if(res != 0) {
-			JANUS_LOG(LOG_ERR, "%s", strerror(errno));
+			JANUS_LOG(LOG_ERR, "%s", g_strerror(errno));
 			return -1;	/* No point going on... */
 		}
 	}
@@ -831,7 +831,7 @@ static void *janus_voicemail_handler(void *data) {
 			/* Did the peer negotiate video? */
 			if(strstr(msg_sdp, "m=video") != NULL) {
 				/* If so, reject it */
-				g_strlcat(sdp, "m=video 0 RTP/SAVPF 0\r\n", 1024);
+				janus_strlcat(sdp, "m=video 0 RTP/SAVPF 0\r\n", 1024);
 			}
 			json_t *jsep = json_pack("{ssss}", "type", type, "sdp", sdp);
 			/* How long will the Janus core take to push the event? */

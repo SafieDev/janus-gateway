@@ -1,11 +1,11 @@
 Janus WebRTC Server
 ===================
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-brightgreen.svg)](COPYING)
-[![Build Status](https://travis-ci.org/meetecho/janus-gateway.svg?branch=master)](https://travis-ci.org/meetecho/janus-gateway)
+![janus-ci](https://github.com/meetecho/janus-gateway/workflows/janus-ci/badge.svg)
 [![Coverity Scan Build Status](https://scan.coverity.com/projects/13265/badge.svg)](https://scan.coverity.com/projects/meetecho-janus-gateway)
 [![Fuzzing Status](https://oss-fuzz-build-logs.storage.googleapis.com/badges/janus-gateway.svg)](https://bugs.chromium.org/p/oss-fuzz/issues/list?sort=-opened&can=1&q=proj:janus-gateway)
 
-Janus is an open source, general purpose, WebRTC server designed and developed by [Meetecho](http://www.meetecho.com). This version of the server is tailored for Linux systems, although it can be compiled for, and installed on, MacOS machines as well. Windows is not supported, but if that's a requirement, Janus is known to work in the "Windows Subsystem for Linux" on Windows 10: do **NOT** trust repos that provide .exe builds of Janus, they are not official and will not be supported.
+Janus is an open source, general purpose, WebRTC server designed and developed by [Meetecho](https://www.meetecho.com). This version of the server is tailored for Linux systems, although it can be compiled for, and installed on, MacOS machines as well. Windows is not supported, but if that's a requirement, Janus is known to work in the "Windows Subsystem for Linux" on Windows 10: do **NOT** trust repos that provide .exe builds of Janus, they are not official and will not be supported.
 
 For some online demos and documentations, make sure you pay the [project website](https://janus.conf.meetecho.com/) a visit!
 
@@ -17,9 +17,9 @@ To install it, you'll need to satisfy the following dependencies:
 
 * [Jansson](http://www.digip.org/jansson/)
 * [libconfig](https://hyperrealm.github.io/libconfig/)
-* [libnice](https://libnice.freedesktop.org/) (at least v0.1.16 suggested, master recommended)
+* [libnice](https://libnice.freedesktop.org/) (at least v0.1.16 suggested, v0.1.18 recommended)
 * [OpenSSL](http://www.openssl.org/) (at least v1.0.1e)
-* [libsrtp](https://github.com/cisco/libsrtp) (at least v1.5 suggested)
+* [libsrtp](https://github.com/cisco/libsrtp) (at least v2.x suggested)
 * [usrsctp](https://github.com/sctplab/usrsctp) (only needed if you are interested in Data Channels)
 * [libmicrohttpd](http://www.gnu.org/software/libmicrohttpd/) (at least v0.9.59; only needed if you are interested in REST support for the Janus API)
 * [libwebsockets](https://libwebsockets.org/) (only needed if you are interested in WebSockets support for the Janus API)
@@ -73,15 +73,7 @@ To build libnice, you need Python 3, Meson and Ninja:
 
 In case you're interested in compiling the sample Event Handler plugin, you'll need to install the development version of libcurl as well (usually `libcurl-devel` on Fedora/CentOS, `libcurl4-openssl-dev` on Ubuntu/Debian).
 
-If your distro ships a pre-1.5 version of libsrtp, you'll have to uninstall that version and [install 1.5.x, 1.6.x or 2.x manually](https://github.com/cisco/libsrtp/releases). In fact, 1.4.x is known to cause several issues with WebRTC. Installation of version 1.5.4 is quite straightforward:
-
-	wget https://github.com/cisco/libsrtp/archive/v1.5.4.tar.gz
-	tar xfv v1.5.4.tar.gz
-	cd libsrtp-1.5.4
-	./configure --prefix=/usr --enable-openssl
-	make shared_library && sudo make install
-
-The instructions for version 2.x are practically the same. Notice that the following steps are for version 2.2.0, but there may be more recent versions available:
+If your distro ships a pre-1.5 version of libsrtp, you'll have to uninstall that version and [install 1.5.x, 1.6.x or 2.x manually](https://github.com/cisco/libsrtp/releases). In fact, 1.4.x is known to cause several issues with WebRTC. While 1.5.x is supported, we recommend installing 2.x instead Notice that the following steps are for version 2.2.0, but there may be more recent versions available:
 
 	wget https://github.com/cisco/libsrtp/archive/v2.2.0.tar.gz
 	tar xfv v2.2.0.tar.gz
@@ -121,7 +113,8 @@ For what concerns usrsctp, which is needed for Data Channels support, it is usua
 	git clone https://github.com/sctplab/usrsctp
 	cd usrsctp
 	./bootstrap
-	./configure --prefix=/usr && make && sudo make install
+	./configure --prefix=/usr --disable-programs --disable-inet --disable-inet6
+	make && sudo make install
 
 * *Note:* you may need to pass `--libdir=/usr/lib64` to the configure script if you're installing on a x86_64 distribution.
 
@@ -134,7 +127,8 @@ The same applies for libwebsockets, which is needed for the optional WebSockets 
 	mkdir build
 	cd build
 	# See https://github.com/meetecho/janus-gateway/issues/732 re: LWS_MAX_SMP
-	cmake -DLWS_MAX_SMP=1 -DCMAKE_INSTALL_PREFIX:PATH=/usr -DCMAKE_C_FLAGS="-fpic" ..
+	# See https://github.com/meetecho/janus-gateway/issues/2476 re: LWS_WITHOUT_EXTENSIONS
+	cmake -DLWS_MAX_SMP=1 -DLWS_WITHOUT_EXTENSIONS=0 -DCMAKE_INSTALL_PREFIX:PATH=/usr -DCMAKE_C_FLAGS="-fpic" ..
 	make && sudo make install
 
 * *Note:* if libwebsockets.org is unreachable for any reason, replace the first line with this:
@@ -213,6 +207,17 @@ If Doxygen and graphviz are available, the process can also build the documentat
 
 You can also selectively enable/disable other features (e.g., specific plugins you don't care about, or whether or not you want to build the recordings post-processor). Use the --help option when configuring for more info.
 
+### Building on FreeBSD
+* *Note*: rtp_forward of streams only works streaming to IPv6,
+because of #2051 and thus the feature is not supported on FreeBSD at the moment.
+
+When building on FreeBSD you can install the depencencies from ports or packages, here only pkg method is used. You also need to use `gmake` instead of `make`,
+since it is a GNU makefile. `./configure` can be run without arguments since the default prefix is `/usr/local` which is your default `LOCALBASE`.
+Note that the `configure.ac` is coded to use openssl in base. If you wish to use openssl from ports or any other ssl you must change `configure.ac` accordingly.
+
+	pkg install libsrtp2 libusrsctp jansson libnice libmicrohttpd libwebsockets curl opus sofia-sip libogg jansson libnice libconfig \
+        libtool gmake autoconf autoconf-wrapper glib gengetopt
+
 
 ### Building on MacOS
 While most of the above instructions will work when compiling Janus on MacOS as well, there are a few aspects to highlight when doing that.
@@ -259,8 +264,9 @@ or on the command line:
 	-c, --cert-pem=filename       DTLS certificate
 	-k, --cert-key=filename       DTLS certificate key
 	-K, --cert-pwd=text           DTLS certificate key passphrase (if needed)
-	-S, --stun-server=filename    STUN server(:port) to use, if needed (e.g.,
-								  Janus behind NAT, default=none)
+	-S, --stun-server=address:port
+                                  STUN server(:port) to use, if needed (e.g.,
+                                  Janus behind NAT, default=none)
 	-1, --nat-1-1=ip              Public IP to put in all host candidates,
                                   assuming a 1:1 NAT is in place (e.g., Amazon
                                   EC2 instances, default=none)
@@ -278,6 +284,8 @@ or on the command line:
                                   vmnet,192.168., default=vmnet)
 	-6, --ipv6-candidates         Whether to enable IPv6 candidates or not
                                   (experimental)  (default=off)
+	-O, --ipv6-link-local         Whether IPv6 link-local candidates should be
+                                  gathered as well  (default=off)
 	-l, --libnice-debug           Whether to enable libnice debugging or not
                                   (default=off)
 	-f, --full-trickle            Do full-trickle instead of half-trickle
@@ -295,6 +303,7 @@ or on the command line:
 	-W, --slowlink-threshold=number
                                   Number of lost packets (per s) that should
                                   trigger a 'slowlink' Janus API event to users
+                                  (default=0, feature disabled)
 	-r, --rtp-port-range=min-max  Port range to use for RTP/RTCP (only available
 								  if the installed libnice supports it)
 	-B, --twcc-period=number      How often (in ms) to send TWCC feedback back to
@@ -330,10 +339,10 @@ This will start the server, and have it look at the configuration file.
 
 Make sure you have a look at all of the configuration files, to tailor Janus to your specific needs: each configuration file is documented, so it shouldn't be hard to make changes according to your requirements. The repo comes with some defaults (assuming you issues `make configs` after installing the server) that tend to make sense for generic deployments, and also includes some sample configurations for all the plugins (e.g., web servers to listen on, conference rooms to create, streaming mountpoints to make available at startup, etc.).
 
-To test whether it's working correctly, you can use the demos provided with this package in the `html` folder: these are exactly the same demos available online on the [project website](http://janus.conf.meetecho.com/). Just copy the file it contains in a webserver, or use a userspace webserver to serve the files in the `html` folder (e.g., with php or python), and open the `index.html` page in either Chrome or Firefox. A list of demo pages exploiting the different plugins will be available. Remember to edit the transport/port details in the demo JavaScript files if you changed any transport-related configuration from its defaults. Besides, the demos refer to the pre-configured plugin resources, so if you add some new resources (e.g., a new videoconference) you may have to tweak the demo pages to actually use them.
+To test whether it's working correctly, you can use the demos provided with this package in the `html` folder: these are exactly the same demos available online on the [project website](https://janus.conf.meetecho.com/). Just copy the file it contains in a webserver, or use a userspace webserver to serve the files in the `html` folder (e.g., with php or python), and open the `index.html` page in either Chrome or Firefox. A list of demo pages exploiting the different plugins will be available. Remember to edit the transport/port details in the demo JavaScript files if you changed any transport-related configuration from its defaults. Besides, the demos refer to the pre-configured plugin resources, so if you add some new resources (e.g., a new videoconference) you may have to tweak the demo pages to actually use them.
 
 ## Documentation
-Janus is thoroughly documented. You can find the current documentation, automatically generated with Doxygen, on the [project website](http://janus.conf.meetecho.com/docs/).
+Janus is thoroughly documented. You can find the current documentation, automatically generated with Doxygen, on the [project website](https://janus.conf.meetecho.com/docs/).
 
 ## Help us!
 Any thought, feedback or (hopefully not!) insult is welcome!

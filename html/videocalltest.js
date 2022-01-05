@@ -148,7 +148,7 @@ $(document).ready(function() {
 										} else if(result["event"]) {
 											var event = result["event"];
 											if(event === 'registered') {
-												myusername = result["username"];
+												myusername = escapeXmlTags(result["username"]);
 												Janus.log("Successfully registered as " + myusername + "!");
 												$('#youok').removeClass('hide').show().html("Registered as '" + myusername + "'");
 												// Get a list of available peers, just for fun
@@ -163,7 +163,7 @@ $(document).ready(function() {
 												bootbox.alert("Waiting for the peer to answer...");
 											} else if(event === 'incomingcall') {
 												Janus.log("Incoming call from " + result["username"] + "!");
-												yourusername = result["username"];
+												yourusername = escapeXmlTags(result["username"]);
 												// Notify user
 												bootbox.hideAll();
 												incoming = bootbox.dialog({
@@ -213,7 +213,7 @@ $(document).ready(function() {
 												});
 											} else if(event === 'accepted') {
 												bootbox.hideAll();
-												var peer = result["username"];
+												var peer = escapeXmlTags(result["username"]);
 												if(!peer) {
 													Janus.log("Call started!");
 												} else {
@@ -273,7 +273,7 @@ $(document).ready(function() {
 												if((substream !== null && substream !== undefined) || (temporal !== null && temporal !== undefined)) {
 													if(!simulcastStarted) {
 														simulcastStarted = true;
-														addSimulcastButtons(result["videocodec"] === "vp8" || result["videocodec"] === "h264");
+														addSimulcastButtons(result["videocodec"] === "vp8");
 													}
 													// We just received notice that there's been a switch, update the buttons
 													updateSimulcastButtons(substream, temporal);
@@ -304,7 +304,7 @@ $(document).ready(function() {
 										$('#bitrate').attr('disabled', true);
 										$('#curbitrate').hide();
 										$('#curres').hide();
-										if(bitrateTimer !== null && bitrateTimer !== null)
+										if(bitrateTimer)
 											clearInterval(bitrateTimer);
 										bitrateTimer = null;
 									}
@@ -313,7 +313,7 @@ $(document).ready(function() {
 									Janus.debug(" ::: Got a local stream :::", stream);
 									$('#videos').removeClass('hide').show();
 									if($('#myvideo').length === 0)
-										$('#videoleft').append('<video class="rounded centered" id="myvideo" width=320 height=240 autoplay playsinline muted="muted"/>');
+										$('#videoleft').append('<video class="rounded centered" id="myvideo" width="100%" height="100%" autoplay playsinline muted="muted"/>');
 									Janus.attachMediaStream($('#myvideo').get(0), stream);
 									$("#myvideo").get(0).muted = "muted";
 									if(videocall.webrtcStuff.pc.iceConnectionState !== "completed" &&
@@ -327,7 +327,7 @@ $(document).ready(function() {
 											}
 										});
 										// No remote video yet
-										$('#videoright').append('<video class="rounded centered" id="waitingvideo" width=320 height=240 />');
+										$('#videoright').append('<video class="rounded centered" id="waitingvideo" width="100%" height="100%" />');
 										if(spinner == null) {
 											var target = document.getElementById('videoright');
 											spinner = new Spinner({top:100}).spin(target);
@@ -356,7 +356,7 @@ $(document).ready(function() {
 									var addButtons = false;
 									if($('#remotevideo').length === 0) {
 										addButtons = true;
-										$('#videoright').append('<video class="rounded centered hide" id="remotevideo" width=320 height=240 autoplay playsinline/>');
+										$('#videoright').append('<video class="rounded centered hide" id="remotevideo" width="100%" height="100%" autoplay playsinline/>');
 										// Show the video, hide the spinner and show the resolution when we get a playing event
 										$("#remotevideo").bind("playing", function () {
 											$('#waitingvideo').remove();
@@ -466,7 +466,7 @@ $(document).ready(function() {
 									$('#bitrate').attr('disabled', true);
 									$('#curbitrate').hide();
 									$('#curres').hide();
-									if(bitrateTimer !== null && bitrateTimer !== null)
+									if(bitrateTimer)
 										clearInterval(bitrateTimer);
 									bitrateTimer = null;
 									$('#waitingvideo').remove();
@@ -598,6 +598,15 @@ function getQueryStringValue(name) {
 	return results === null ? "" : decodeURIComponent(results[1].replace(/\+/g, " "));
 }
 
+// Helper to escape XML tags
+function escapeXmlTags(value) {
+	if(value) {
+		var escapedValue = value.replace(new RegExp('<', 'g'), '&lt');
+		escapedValue = escapedValue.replace(new RegExp('>', 'g'), '&gt');
+		return escapedValue;
+	}
+}
+
 // Helpers to create Simulcast-related UI, if enabled
 function addSimulcastButtons(temporal) {
 	$('#curres').parent().append(
@@ -617,6 +626,12 @@ function addSimulcastButtons(temporal) {
 		'		</div>' +
 		'	</div>' +
 		'</div>');
+	if(Janus.webRTCAdapter.browserDetails.browser !== "firefox") {
+		// Chromium-based browsers only have two temporal layers
+		$('#tl-2').remove();
+		$('#tl-1').css('width', '50%');
+		$('#tl-0').css('width', '50%');
+	}
 	// Enable the simulcast selection buttons
 	$('#sl-0').removeClass('btn-primary btn-success').addClass('btn-primary')
 		.unbind('click').click(function() {

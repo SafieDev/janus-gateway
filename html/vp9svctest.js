@@ -387,7 +387,7 @@ function registerUsername() {
 			ptype: "publisher",
 			display: username
 		};
-		myusername = username;
+		myusername = escapeXmlTags(username);
 		sfutest.send({ message: register });
 	}
 }
@@ -486,7 +486,7 @@ function newRemoteFeed(id, display, audio, video) {
 							}
 						}
 						remoteFeed.rfid = msg["id"];
-						remoteFeed.rfdisplay = msg["display"];
+						remoteFeed.rfdisplay = escapeXmlTags(msg["display"]);
 						if(!remoteFeed.spinner) {
 							var target = document.getElementById('videoremote'+remoteFeed.rfindex);
 							remoteFeed.spinner = new Spinner({top:100}).spin(target);
@@ -548,7 +548,7 @@ function newRemoteFeed(id, display, audio, video) {
 				if($('#remotevideo'+remoteFeed.rfindex).length === 0) {
 					addButtons = true;
 					// No remote video yet
-					$('#videoremote'+remoteFeed.rfindex).append('<video class="rounded centered" id="waitingvideo' + remoteFeed.rfindex + '" width=320 height=240 />');
+					$('#videoremote'+remoteFeed.rfindex).append('<video class="rounded centered" id="waitingvideo' + remoteFeed.rfindex + '" width="100%" height="100%" />');
 					$('#videoremote'+remoteFeed.rfindex).append('<video class="rounded centered relative hide" id="remotevideo' + remoteFeed.rfindex + '" width="100%" height="100%" autoplay playsinline/>');
 					$('#videoremote'+remoteFeed.rfindex).append(
 						'<span class="label label-primary hide" id="curres'+remoteFeed.rfindex+'" style="position: absolute; bottom: 0px; left: 0px; margin: 15px;"></span>' +
@@ -617,7 +617,7 @@ function newRemoteFeed(id, display, audio, video) {
 				$('#novideo'+remoteFeed.rfindex).remove();
 				$('#curbitrate'+remoteFeed.rfindex).remove();
 				$('#curres'+remoteFeed.rfindex).remove();
-				if(bitrateTimer[remoteFeed.rfindex] !== null && bitrateTimer[remoteFeed.rfindex] !== null)
+				if(bitrateTimer[remoteFeed.rfindex])
 					clearInterval(bitrateTimer[remoteFeed.rfindex]);
 				bitrateTimer[remoteFeed.rfindex] = null;
 				$('#sl'+remoteFeed.rfindex+'-1').unbind('click');
@@ -628,6 +628,15 @@ function newRemoteFeed(id, display, audio, video) {
 				$('#layers'+remoteFeed.rfindex).addClass('hide');
 			}
 		});
+}
+
+// Helper to escape XML tags
+function escapeXmlTags(value) {
+	if(value) {
+		var escapedValue = value.replace(new RegExp('<', 'g'), '&lt');
+		escapedValue = escapedValue.replace(new RegExp('>', 'g'), '&gt');
+		return escapedValue;
+	}
 }
 
 // Helpers to create SVC-related UI for a new viewer

@@ -10,7 +10,7 @@
  */
 
 #include <arpa/inet.h>
-#ifdef __MACH__
+#if defined(__MACH__) || defined(__FreeBSD__)
 #include <machine/endian.h>
 #else
 #include <endian.h>
@@ -116,6 +116,13 @@ int16_t janus_pp_g711_alaw_table[256] =
       944,   912,  1008,   976,   816,   784,   880,   848
 };
 
+/* Supported target formats */
+static const char *janus_pp_g711_formats[] = {
+	"wav", NULL
+};
+const char **janus_pp_g711_get_extensions(void) {
+	return janus_pp_g711_formats;
+}
 
 /* Processing methods */
 int janus_pp_g711_create(char *destination, char *metadata) {
@@ -162,13 +169,12 @@ int janus_pp_g711_process(FILE *file, janus_pp_frame_packet *list, int *working)
 	memset(samples, 0, sizeof(samples));
 	size_t num_samples = 160;
 	while(*working && tmp != NULL) {
-		if(tmp->prev != NULL && (tmp->seq - tmp->prev->seq > 1)) {
+		if(tmp->prev != NULL && ((tmp->ts - tmp->prev->ts)/8/20 > 1)) {
 			JANUS_LOG(LOG_WARN, "Lost a packet here? (got seq %"SCNu16" after %"SCNu16", time ~%"SCNu64"s)\n",
-				tmp->seq, tmp->prev->seq, (tmp->ts-list->ts)/48000);
-			/* FIXME Write the silence packet N times to fill in the gaps */
+				tmp->seq, tmp->prev->seq, (tmp->ts-list->ts)/8000);
+			int silence_count = (tmp->ts - tmp->prev->ts)/8/20 - 1;
 			int i=0;
-			for(i=0; i<(tmp->seq-tmp->prev->seq-1); i++) {
-				/* FIXME We should actually also look at the timestamp differences */
+			for(i=0; i<silence_count; i++) {
 				JANUS_LOG(LOG_WARN, "[FILL] Writing silence (seq=%d, index=%d)\n",
 					tmp->prev->seq+i+1, i+1);
 				/* Add silence */
@@ -183,7 +189,7 @@ int janus_pp_g711_process(FILE *file, janus_pp_frame_packet *list, int *working)
 		}
 		if(tmp->drop) {
 			/* We marked this packet as one to drop, before */
-			JANUS_LOG(LOG_WARN, "Dropping previously marked audio packet (time ~%"SCNu64"s)\n", (tmp->ts-list->ts)/48000);
+			JANUS_LOG(LOG_WARN, "Dropping previously marked audio packet (time ~%"SCNu64"s)\n", (tmp->ts-list->ts)/8000);
 			tmp = tmp->next;
 			continue;
 		}

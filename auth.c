@@ -57,7 +57,7 @@ void janus_auth_init(gboolean enabled, const char *secret) {
 			auth_enabled = TRUE;
 		}
 	} else {
-		JANUS_LOG(LOG_WARN, "Token based authentication disabled\n");
+		JANUS_LOG(LOG_INFO, "Token based authentication disabled\n");
 	}
 	janus_mutex_init(&mutex);
 }
@@ -68,6 +68,10 @@ gboolean janus_auth_is_enabled(void) {
 
 gboolean janus_auth_is_stored_mode(void) {
 	return auth_enabled && tokens != NULL;
+}
+
+gboolean janus_auth_is_signed_mode(void) {
+	return auth_enabled && auth_secret != NULL;
 }
 
 void janus_auth_deinit(void) {
@@ -121,7 +125,10 @@ fail:
 }
 
 gboolean janus_auth_check_signature_contains(const char *token, const char *realm, const char *desc) {
-	if (!auth_enabled || auth_secret == NULL)
+	if (!auth_enabled || auth_secret == NULL) {
+		return TRUE;
+	}
+	if(token == NULL)
 		return FALSE;
 	gchar **parts = g_strsplit(token, ":", 2);
 	gchar **data = NULL;

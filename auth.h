@@ -30,6 +30,8 @@ void janus_auth_init(gboolean enabled, const char *secret);
 gboolean janus_auth_is_enabled(void);
 /*! \brief Method to check whether the mechanism is in stored-token mode or not */
 gboolean janus_auth_is_stored_mode(void);
+/*! \brief Method to check whether the mechanism is in signed-token mode or not */
+gboolean janus_auth_is_signed_mode(void);
 /*! \brief Method to de-initialize the mechanism */
 void janus_auth_deinit(void);
 
@@ -42,7 +44,7 @@ gboolean janus_auth_check_signature(const char *token, const char *realm);
  * @param[in] token The token to validate
  * @param[in] realm The token realm
  * @param[in] desc The descriptor to search for
- * @returns TRUE if the token is valid, not expired and contains the descriptor, FALSE otherwise */
+ * @returns When the token based authentication is enabled: TRUE if  the token is valid, not expired and contains the descriptor, FALSE otherwise. When the token based authentication is disabled: always TRUE. */
 gboolean janus_auth_check_signature_contains(const char *token, const char *realm, const char *desc);
 
 /*! \brief Method to add a new valid token for authenticating

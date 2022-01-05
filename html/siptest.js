@@ -446,6 +446,16 @@ $(document).ready(function() {
 											$('#call').removeAttr('disabled').html('Call')
 												.removeClass("btn-danger").addClass("btn-success")
 												.unbind('click').click(doCall);
+										} else if(event === 'messagedelivery') {
+											// message delivery status
+											let reason = result["reason"];
+											let code = result["code"];
+											let callid = msg['call_id'];
+											if (code == 200) {
+												toastr.success(`${callid} Delivery Status: ${code} ${reason}`);
+											} else {
+												toastr.error(`${callid} Delivery Status: ${code} ${reason}`);
+											}
 										}
 									}
 								},
@@ -453,7 +463,7 @@ $(document).ready(function() {
 									Janus.debug(" ::: Got a local stream :::", stream);
 									$('#videos').removeClass('hide').show();
 									if($('#myvideo').length === 0)
-										$('#videoleft').append('<video class="rounded centered" id="myvideo" width=320 height=240 autoplay playsinline muted="muted"/>');
+										$('#videoleft').append('<video class="rounded centered" id="myvideo" width="100%" height="100%" autoplay playsinline muted="muted"/>');
 									Janus.attachMediaStream($('#myvideo').get(0), stream);
 									$("#myvideo").get(0).muted = "muted";
 									if(sipcall.webrtcStuff.pc.iceConnectionState !== "completed" &&
@@ -467,7 +477,7 @@ $(document).ready(function() {
 											}
 										});
 										// No remote video yet
-										$('#videoright').append('<video class="rounded centered" id="waitingvideo" width=320 height=240 />');
+										$('#videoright').append('<video class="rounded centered" id="waitingvideo" width="100%" height="100%" />');
 										if(spinner == null) {
 											var target = document.getElementById('videoright');
 											spinner = new Spinner({top:100}).spin(target);
@@ -502,7 +512,7 @@ $(document).ready(function() {
 												'<button id="transfer" title="Transfer call" class="btn btn-info"><i class="fa fa-mail-forward"></i></button>' +
 											'</span>');
 										$('#videoright').append(
-											'<video class="rounded centered hide" id="remotevideo" width=320 height=240 autoplay playsinline/>');
+											'<video class="rounded centered hide" id="remotevideo" width="100%" height="100%" autoplay playsinline/>');
 										for(var i=0; i<12; i++) {
 											if(i<10)
 												$('#dtmf').append('<button class="btn btn-info dtmf">' + i + '</button>');
@@ -843,14 +853,14 @@ function doCall(ev) {
 		bootbox.alert('Please insert a valid SIP address (e.g., sip:pluto@example.com)');
 		$('#peer' + suffix).removeAttr('disabled');
 		$('#dovideo' + suffix).removeAttr('disabled');
-		$('#call' + suffix).removeAttr('disabled').click(function() { doCall(helperId); });
+		$('#call' + suffix).removeAttr('disabled').click(function(ev) { doCall(ev); });
 		return;
 	}
 	if(username.indexOf("sip:") != 0 || username.indexOf("@") < 0) {
 		bootbox.alert('Please insert a valid SIP address (e.g., sip:pluto@example.com)');
 		$('#peer' + suffix).removeAttr('disabled').val("");
 		$('#dovideo' + suffix).removeAttr('disabled').val("");
-		$('#call' + suffix).removeAttr('disabled').click(function() { doCall(helperId); });
+		$('#call' + suffix).removeAttr('disabled').click(function(ev) { doCall(ev); });
 		return;
 	}
 	// Call this URI
@@ -964,7 +974,7 @@ function addHelper(helperCreated) {
 		'				<button disabled class="btn btn-success margin-bottom-sm" autocomplete="off" id="call' + helperId + '">Call</button> <input autocomplete="off" id="dovideo' + helperId + '" type="checkbox">Use Video</input>' +
 		'			</div>' +
 		'		</div>' +
-		'	<div/>' +
+		'	</div>' +
 		'	<div id="videos' + helperId + '" class="hide">' +
 		'		<div class="col-md-6">' +
 		'			<div class="panel panel-default">' +
@@ -1313,6 +1323,16 @@ function addHelper(helperCreated) {
 						$('#call' + helperId).removeAttr('disabled').html('Call')
 							.removeClass("btn-danger").addClass("btn-success")
 							.unbind('click').click(doCall);
+					} else if(event === 'messagedelivery') {
+						// message delivery status
+						let reason = result["reason"];
+						let code = result["code"];
+						let callid = msg['call_id'];
+						if (code == 200) {
+							toastr.success(`${callid}/${helperId} Delivery Status: ${code} ${reason}`);
+						} else {
+							toastr.error(`${callid}/${helperId} Delivery Status: ${code} ${reason}`);
+						}
 					}
 				}
 			},
@@ -1320,7 +1340,7 @@ function addHelper(helperCreated) {
 				Janus.debug("[Helper #" + helperId + "]  ::: Got a local stream :::", stream);
 				$('#videos' + helperId).removeClass('hide').show();
 				if($('#myvideo' + helperId).length === 0)
-					$('#videoleft' + helperId).append('<video class="rounded centered" id="myvideo' + helperId + '" width=320 height=240 autoplay playsinline muted="muted"/>');
+					$('#videoleft' + helperId).append('<video class="rounded centered" id="myvideo' + helperId + '" width="100%" height="100%" autoplay playsinline muted="muted"/>');
 				Janus.attachMediaStream($('#myvideo' + helperId).get(0), stream);
 				$("#myvideo" + helperId).get(0).muted = "muted";
 				if(helpers[helperId].sipcall.webrtcStuff.pc.iceConnectionState !== "completed" &&
@@ -1334,7 +1354,7 @@ function addHelper(helperCreated) {
 						}
 					});
 					// No remote video yet
-					$('#videoright' + helperId).append('<video class="rounded centered" id="waitingvideo' + helperId + '" width=320 height=240 />');
+					$('#videoright' + helperId).append('<video class="rounded centered" id="waitingvideo' + helperId + '" width="100%" height="100%" />');
 					if(helpers[helperId].spinner == null) {
 						var target = document.getElementById('videoright' + helperId);
 						helpers[helperId].spinner = new Spinner({top:100}).spin(target);
@@ -1369,7 +1389,7 @@ function addHelper(helperCreated) {
 							'<button id="transfer' + helperId + '" title="Transfer call" class="btn btn-info"><i class="fa fa-mail-forward"></i></button>' +
 						'</span>');
 					$('#videoright' + helperId).append(
-						'<video class="rounded centered hide" id="remotevideo' + helperId + '" width=320 height=240 autoplay playsinline/>');
+						'<video class="rounded centered hide" id="remotevideo' + helperId + '" width="100%" height="100%" autoplay playsinline/>');
 					for(var i=0; i<12; i++) {
 						if(i<10)
 							$('#dtmf' + helperId).append('<button class="btn btn-info dtmf">' + i + '</button>');

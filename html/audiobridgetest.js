@@ -55,6 +55,15 @@ var opaqueId = "audiobridgetest-"+Janus.randomString(12);
 var spinner = null;
 
 var myroom = 1234;	// Demo room
+if(getQueryStringValue("room") !== "")
+	myroom = parseInt(getQueryStringValue("room"));
+var acodec = (getQueryStringValue("acodec") !== "" ? getQueryStringValue("acodec") : null);
+var stereo = false;
+if(getQueryStringValue("stereo") !== "")
+	stereo = (getQueryStringValue("stereo") === "true");
+var mygroup = null;	// Forwarding group, if required by the room
+if(getQueryStringValue("group") !== "")
+	mygroup = getQueryStringValue("group");
 var myusername = null;
 var myid = null;
 var webrtcUp = false;
@@ -144,7 +153,13 @@ $(document).ready(function() {
 													// Publish our stream
 													mixertest.createOffer(
 														{
-															media: { video: false},	// This is an audio only room
+															media: { video: false },	// This is an audio only room
+															customizeSdp: function(jsep) {
+																if(stereo && jsep.sdp.indexOf("stereo=1") == -1) {
+																	// Make sure that our offer contains stereo too
+																	jsep.sdp = jsep.sdp.replace("useinbandfec=1", "useinbandfec=1;stereo=1");
+																}
+															},
 															success: function(jsep) {
 																Janus.debug("Got SDP!", jsep);
 																var publish = { request: "configure", muted: false };
@@ -163,25 +178,37 @@ $(document).ready(function() {
 												Janus.debug("Got a list of participants:", list);
 												for(var f in list) {
 													var id = list[f]["id"];
-													var display = list[f]["display"];
+													var display = escapeXmlTags(list[f]["display"]);
 													var setup = list[f]["setup"];
 													var muted = list[f]["muted"];
+													var spatial = list[f]["spatial_position"];
 													Janus.debug("  >> [" + id + "] " + display + " (setup=" + setup + ", muted=" + muted + ")");
-													if($('#rp'+id).length === 0) {
+													if($('#rp' + id).length === 0) {
 														// Add to the participants list
-														$('#list').append('<li id="rp'+id+'" class="list-group-item">'+display+
+														var slider = '';
+														if(spatial !== null && spatial !== undefined)
+															slider = '<span>[L <input id="sp' + id + '" type="text" style="width: 10%;"/> R] </span>';
+														$('#list').append('<li id="rp' + id +'" class="list-group-item">' +
+															slider +
+															display +
 															' <i class="absetup fa fa-chain-broken"></i>' +
 															' <i class="abmuted fa fa-microphone-slash"></i></li>');
-														$('#rp'+id + ' > i').hide();
+														if(spatial !== null && spatial !== undefined) {
+															$('#sp' + id).slider({ min: 0, max: 100, step: 1, value: 50, handle: 'triangle', enabled: false });
+															$('#position').removeClass('hide').show();
+														}
+														$('#rp' + id + ' > i').hide();
 													}
 													if(muted === true || muted === "true")
-														$('#rp'+id + ' > i.abmuted').removeClass('hide').show();
+														$('#rp' + id + ' > i.abmuted').removeClass('hide').show();
 													else
-														$('#rp'+id + ' > i.abmuted').hide();
+														$('#rp' + id + ' > i.abmuted').hide();
 													if(setup === true || setup === "true")
-														$('#rp'+id + ' > i.absetup').hide();
+														$('#rp' + id + ' > i.absetup').hide();
 													else
-														$('#rp'+id + ' > i.absetup').removeClass('hide').show();
+														$('#rp' + id + ' > i.absetup').removeClass('hide').show();
+													if(spatial !== null && spatial !== undefined)
+														$('#sp' + id).slider('setValue', spatial);
 												}
 											}
 										} else if(event === "roomchanged") {
@@ -195,25 +222,37 @@ $(document).ready(function() {
 												Janus.debug("Got a list of participants:", list);
 												for(var f in list) {
 													var id = list[f]["id"];
-													var display = list[f]["display"];
+													var display = escapeXmlTags(list[f]["display"]);
 													var setup = list[f]["setup"];
 													var muted = list[f]["muted"];
+													var spatial = list[f]["spatial_position"];
 													Janus.debug("  >> [" + id + "] " + display + " (setup=" + setup + ", muted=" + muted + ")");
-													if($('#rp'+id).length === 0) {
+													if($('#rp' + id).length === 0) {
 														// Add to the participants list
-														$('#list').append('<li id="rp'+id+'" class="list-group-item">'+display+
+														var slider = '';
+														if(spatial !== null && spatial !== undefined)
+															slider = '<span>[L <input id="sp' + id + '" type="text" style="width: 10%;"/> R] </span>';
+														$('#list').append('<li id="rp' + id +'" class="list-group-item">' +
+															slider +
+															display +
 															' <i class="absetup fa fa-chain-broken"></i>' +
 															' <i class="abmuted fa fa-microphone-slash"></i></li>');
-														$('#rp'+id + ' > i').hide();
+														if(spatial !== null && spatial !== undefined) {
+															$('#sp' + id).slider({ min: 0, max: 100, step: 1, value: 50, handle: 'triangle', enabled: false });
+															$('#position').removeClass('hide').show();
+														}
+														$('#rp' + id + ' > i').hide();
 													}
 													if(muted === true || muted === "true")
-														$('#rp'+id + ' > i.abmuted').removeClass('hide').show();
+														$('#rp' + id + ' > i.abmuted').removeClass('hide').show();
 													else
-														$('#rp'+id + ' > i.abmuted').hide();
+														$('#rp' + id + ' > i.abmuted').hide();
 													if(setup === true || setup === "true")
-														$('#rp'+id + ' > i.absetup').hide();
+														$('#rp' + id + ' > i.absetup').hide();
 													else
-														$('#rp'+id + ' > i.absetup').removeClass('hide').show();
+														$('#rp' + id + ' > i.absetup').removeClass('hide').show();
+													if(spatial !== null && spatial !== undefined)
+														$('#sp' + id).slider('setValue', spatial);
 												}
 											}
 										} else if(event === "destroyed") {
@@ -228,25 +267,37 @@ $(document).ready(function() {
 												Janus.debug("Got a list of participants:", list);
 												for(var f in list) {
 													var id = list[f]["id"];
-													var display = list[f]["display"];
+													var display = escapeXmlTags(list[f]["display"]);
 													var setup = list[f]["setup"];
 													var muted = list[f]["muted"];
+													var spatial = list[f]["spatial_position"];
 													Janus.debug("  >> [" + id + "] " + display + " (setup=" + setup + ", muted=" + muted + ")");
-													if($('#rp'+id).length === 0) {
+													if($('#rp' + id).length === 0) {
 														// Add to the participants list
-														$('#list').append('<li id="rp'+id+'" class="list-group-item">'+display+
+														var slider = '';
+														if(spatial !== null && spatial !== undefined)
+															slider = '<span>[L <input id="sp' + id + '" type="text" style="width: 10%;"/> R] </span>';
+														$('#list').append('<li id="rp' + id +'" class="list-group-item">' +
+															slider +
+															display +
 															' <i class="absetup fa fa-chain-broken"></i>' +
 															' <i class="abmuted fa fa-microphone-slash"></i></li>');
-														$('#rp'+id + ' > i').hide();
+														if(spatial !== null && spatial !== undefined) {
+															$('#sp' + id).slider({ min: 0, max: 100, step: 1, value: 50, handle: 'triangle', enabled: false });
+															$('#position').removeClass('hide').show();
+														}
+														$('#rp' + id + ' > i').hide();
 													}
 													if(muted === true || muted === "true")
-														$('#rp'+id + ' > i.abmuted').removeClass('hide').show();
+														$('#rp' + id + ' > i.abmuted').removeClass('hide').show();
 													else
-														$('#rp'+id + ' > i.abmuted').hide();
+														$('#rp' + id + ' > i.abmuted').hide();
 													if(setup === true || setup === "true")
-														$('#rp'+id + ' > i.absetup').hide();
+														$('#rp' + id + ' > i.absetup').hide();
 													else
-														$('#rp'+id + ' > i.absetup').removeClass('hide').show();
+														$('#rp' + id + ' > i.absetup').removeClass('hide').show();
+													if(spatial !== null && spatial !== undefined)
+														$('#sp' + id).slider('setValue', spatial);
 												}
 											} else if(msg["error"]) {
 												if(msg["error_code"] === 485) {
@@ -304,7 +355,18 @@ $(document).ready(function() {
 												$('#toggleaudio').html("Unmute").removeClass("btn-danger").addClass("btn-success");
 											mixertest.send({ message: { request: "configure", muted: !audioenabled }});
 										}).removeClass('hide').show();
-
+									// Spatial position, if enabled
+									$('#position').click(
+										function() {
+											bootbox.prompt("Insert new spatial position: [0-100] (0=left, 50=center, 100=right)", function(result) {
+												var spatial = parseInt(result);
+												if(isNaN(spatial) || spatial < 0 || spatial > 100) {
+													bootbox.alert("Invalid value");
+													return;
+												}
+												mixertest.send({ message: { request: "configure", spatial_position: spatial }});
+											});
+										});
 								},
 								oncleanup: function() {
 									webrtcUp = false;
@@ -367,7 +429,31 @@ function registerUsername() {
 			return;
 		}
 		var register = { request: "join", room: myroom, display: username };
-		myusername = username;
-		mixertest.send({ message: register});
+		myusername = escapeXmlTags(username);
+		// Check if we need to join using G.711 instead of (default) Opus
+		if(acodec === 'opus' || acodec === 'pcmu' || acodec === 'pcma')
+			register.codec = acodec;
+		// If the room uses forwarding groups, this is how we state ours
+		if(mygroup)
+			register["group"] = mygroup;
+		// Send the message
+		mixertest.send({ message: register });
+	}
+}
+
+// Helper to parse query string
+function getQueryStringValue(name) {
+	name = name.replace(/[\[]/, "\\[").replace(/[\]]/, "\\]");
+	var regex = new RegExp("[\\?&]" + name + "=([^&#]*)"),
+		results = regex.exec(location.search);
+	return results === null ? "" : decodeURIComponent(results[1].replace(/\+/g, " "));
+}
+
+// Helper to escape XML tags
+function escapeXmlTags(value) {
+	if(value) {
+		var escapedValue = value.replace(new RegExp('<', 'g'), '&lt');
+		escapedValue = escapedValue.replace(new RegExp('>', 'g'), '&gt');
+		return escapedValue;
 	}
 }

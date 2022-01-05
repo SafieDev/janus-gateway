@@ -1,9 +1,17 @@
 declare namespace JanusJS {
 	interface Dependencies {
 		adapter: any;
+		WebSocket: (server: string, protocol: string) => WebSocket;
+		isArray: (array: any) => array is Array<any>;
+		extension: () => boolean;
+		httpAPICall: (url: string, options: any) => void;
+	}
+
+	interface DependenciesResult {
+		adapter: any;
 		newWebSocket: (server: string, protocol: string) => WebSocket;
 		isArray: (array: any) => array is Array<any>;
-		checkJanusExtension: () => boolean;
+		extension: () => boolean;
 		httpAPICall: (url: string, options: any) => void;
 	}
 
@@ -20,7 +28,7 @@ declare namespace JanusJS {
 	interface InitOptions {
 		debug?: boolean | 'all' | DebugLevel[];
 		callback?: Function;
-		dependencies?: Dependencies;
+		dependencies?: DependenciesResult;
 	}
 
 	interface ConstructorOptions {
@@ -35,6 +43,19 @@ declare namespace JanusJS {
 		success?: Function;
 		error?: (error: any) => void;
 		destroyed?: Function;
+	}
+	
+	interface ReconnectOptions {
+		success?: Function;
+		error?: (error: any) => void;
+	}
+
+	interface DestroyOptions {
+		cleanupHandles?: boolean
+		notifyDestroyed?: boolean
+		unload?: boolean
+		success?: () => void
+		error?: (error: Error | unknown) => void
 	}
 
 	enum MessageType {
@@ -59,13 +80,14 @@ declare namespace JanusJS {
 	interface PluginOptions {
 		plugin: string;
 		opaqueId?: string;
+		dataChannelOptions?: RTCDataChannelInit;
 		success?: (handle: PluginHandle) => void;
 		error?: (error: any) => void;
 		consentDialog?: (on: boolean) => void;
 		webrtcState?: (isConnected: boolean) => void;
-		iceState?: (state: 'connected' | 'failed') => void;
-		mediaState?: (state: { type: 'audio' | 'video'; on: boolean }) => void;
-		slowLink?: (state: { uplink: boolean }) => void;
+		iceState?: (state: 'connected' | 'failed' | 'disconnected' | 'closed') => void;
+		mediaState?: (medium: 'audio' | 'video', receiving: boolean, mid?: number) => void;
+		slowLink?: (uplink: boolean, lost: number) => void;
 		onmessage?: (message: Message, jsep?: JSEP) => void;
 		onlocalstream?: (stream: MediaStream) => void;
 		onremotestream?: (stream: MediaStream) => void;
@@ -108,9 +130,33 @@ declare namespace JanusJS {
 			[otherProps: string]: any;
 		};
 		jsep?: JSEP;
+		success?: Function;
+		error?: (error: any) => void;
 	}
 
 	interface PluginHandle {
+		plugin: string;
+		id: string;
+		token?: string;
+		detached : boolean;
+		webrtcStuff: {
+			started: boolean,
+			myStream: MediaStream,
+			streamExternal: boolean,
+			remoteStream: MediaStream,
+			mySdp: any,
+			mediaConstraints: any,
+			pc: RTCPeerConnection,
+			dataChannelOptions: RTCDataChannelInit,
+			dataChannel: Array<RTCDataChannel>,
+			dtmfSender: any,
+			trickle: boolean,
+			iceDone: boolean,
+			volume: {
+				value: number,
+				timer: number
+			}
+		};
 		getId(): string;
 		getPlugin(): string;
 		send(message: PluginMessage): void;
@@ -119,17 +165,22 @@ declare namespace JanusJS {
 		handleRemoteJsep(params: { jsep: JSEP }): void;
 		dtmf(params: any): void;
 		data(params: any): void;
+		isAudioMuted(): boolean;
+		muteAudio(): void;
+		unmuteAudio(): void;
 		isVideoMuted(): boolean;
 		muteVideo(): void;
 		unmuteVideo(): void;
-		getBitrate(): number;
+		getBitrate(): string;
 		hangup(sendRequest?: boolean): void;
 		detach(params: any): void;
 	}
 
 	class Janus {
-		static useDefaultDependencies(deps: Partial<Dependencies>): Dependencies;
-		static useOldDependencies(deps: Partial<Dependencies>): Dependencies;
+		static webRTCAdapter: any;
+		static safariVp8: boolean;
+		static useDefaultDependencies(deps: Partial<Dependencies>): DependenciesResult;
+		static useOldDependencies(deps: Partial<Dependencies>): DependenciesResult;
 		static init(options: InitOptions): void;
 		static isWebrtcSupported(): boolean;
 		static debug(...args: any[]): void;
@@ -146,7 +197,8 @@ declare namespace JanusJS {
 		isConnected(): boolean;
 		getSessionId(): string;
 		attach(options: PluginOptions): void;
-		destroy(): void;
+		reconnect(options: ReconnectOptions): void;
+		destroy(options: DestroyOptions): void;
 	}
 }
 
