@@ -1136,8 +1136,10 @@ void janus_safievoice_incoming_rtp(janus_plugin_session *handle, janus_plugin_rt
 
     gint64 total_latency = buffering_latency + incoming_latency + PLAYBACK_LATENCY_IN_USEC;
 	if (total_latency < 0) {
-        JANUS_LOG(LOG_ERR, "seq=%d, total_latency=%"G_GINT64_FORMAT" < 0, latency(in=%"G_GINT64_FORMAT":buf=%"G_GINT64_FORMAT")\n",
+        JANUS_LOG(LOG_ERR, "seq=%d, ts=%d,%"G_GINT64_FORMAT", total_latency=%"G_GINT64_FORMAT" < 0, latency(in=%"G_GINT64_FORMAT":buf=%"G_GINT64_FORMAT")\n",
             seq,
+			hl_timestamp,
+			total_timestamp,
             total_latency,
             incoming_latency,
             buffering_latency);
