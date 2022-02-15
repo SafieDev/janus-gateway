@@ -950,7 +950,7 @@ int janus_ice_test_stun_server(janus_network_address *addr, uint16_t port,
 	fd_set readfds;
 	FD_ZERO(&readfds);
 	FD_SET(fd, &readfds);
-	timeout.tv_sec = 5;	/* FIXME Don't wait forever */
+	timeout.tv_sec = 3;	/* FIXME Don't wait forever */
 	timeout.tv_usec = 0;
 	int err = select(fd+1, &readfds, NULL, NULL, &timeout);
 	if(err < 0) {
