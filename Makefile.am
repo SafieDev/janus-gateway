@@ -531,6 +531,17 @@ EXTRA_DIST += conf/janus.plugin.safievoice.jcfg.sample.in
 CLEANFILES += conf/janus.plugin.safievoice.jcfg.sample
 endif
 
+if ENABLE_PLUGIN_SAFIEDATA
+plugin_LTLIBRARIES += plugins/libjanus_safiedata.la
+plugins_libjanus_safiedata_la_SOURCES = plugins/janus_safiedata.c
+plugins_libjanus_safiedata_la_CFLAGS = $(plugins_cflags)
+plugins_libjanus_safiedata_la_LDFLAGS = $(plugins_ldflags) -lopus -lasound
+plugins_libjanus_safiedata_la_LIBADD = $(plugins_libadd)
+conf_DATA += conf/janus.plugin.safiedata.jcfg.sample
+EXTRA_DIST += conf/janus.plugin.safiedata.jcfg.sample.in
+CLEANFILES += conf/janus.plugin.safiedata.jcfg.sample
+endif
+
 if ENABLE_PLUGIN_TEXTROOM
 plugin_LTLIBRARIES += plugins/libjanus_textroom.la
 plugins_libjanus_textroom_la_SOURCES = plugins/janus_textroom.c

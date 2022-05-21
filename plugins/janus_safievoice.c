@@ -133,7 +133,7 @@
 #define JANUS_SAFIEVOICE_VERSION_STRING	"0.0.7"
 #define JANUS_SAFIEVOICE_DESCRIPTION	"This is a plugin implementing a very simple SafieVoice service for Janus."
 #define JANUS_SAFIEVOICE_NAME			"JANUS SafieVoice plugin"
-#define JANUS_SAFIEVOICE_AUTHOR			"Meetecho s.r.l."
+#define JANUS_SAFIEVOICE_AUTHOR			"longshen.yang"
 #define JANUS_SAFIEVOICE_PACKAGE		"janus.plugin.safievoice"
 
 #define ARRAY_OF(a)               (sizeof(a) / sizeof(a[0]))
