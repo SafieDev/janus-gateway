@@ -528,7 +528,8 @@ struct janus_plugin_result *janus_safiedata_handle_message(janus_plugin_session 
 }
 
 void janus_safiedata_setup_media(janus_plugin_session *handle) {
-	JANUS_LOG(LOG_INFO, "[%s-%p] WebRTC media is now available\n", JANUS_SAFIEDATA_PACKAGE, handle);
+	JANUS_LOG(LOG_INFO, "[%s-%p] WebRTC data is setuped\n", JANUS_SAFIEDATA_PACKAGE, handle);
+
 	if(g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized))
 		return;
 	janus_mutex_lock(&sessions_mutex);
@@ -568,6 +569,8 @@ void janus_safiedata_incoming_rtcp(janus_plugin_session *handle, janus_plugin_rt
 }
 
 void janus_safiedata_incoming_data(janus_plugin_session *handle, janus_plugin_data *packet) {
+	JANUS_LOG(LOG_INFO, "[%s-%p] WebRTC data is comming\n", JANUS_SAFIEDATA_PACKAGE, handle);
+
 	if(handle == NULL || g_atomic_int_get(&handle->stopped) || g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized))
 		return;
 	/* Simple echo test */
@@ -611,6 +614,8 @@ void janus_safiedata_incoming_data(janus_plugin_session *handle, janus_plugin_da
 }
 
 void janus_safiedata_data_ready(janus_plugin_session *handle) {
+	JANUS_LOG(LOG_INFO, "[%s-%p] WebRTC data is ready\n", JANUS_SAFIEDATA_PACKAGE, handle);
+
 	if(handle == NULL || g_atomic_int_get(&handle->stopped) ||
 			g_atomic_int_get(&stopping) || !g_atomic_int_get(&initialized) || !gateway)
 		return;
