@@ -246,7 +246,7 @@ static struct janus_safievoice_latency_skip_param {
 #define RECORD_LATENCY_IN_USEC       (RECORD_LATENCY_FRAME_NUM*RECORD_MSEC_PER_FRAME*USEC_PER_MSEC)
 #define RECORD_LATENCY_BUF_SIZE      (RECORD_LATENCY_FRAME_NUM*RECORD_PCM_FRAME_BUF_SIZE)
 #define RECORD_MAX_LATENCY_BUF_SIZE  (RECORD_PCM_BUF_SIZE_PER_SEC) /* 1s */
-#define RECORD_TIMESTAMP_SAMPLE_NUM  (RECORD_MSEC_PER_FRAME*48000/MSEC_PER_SEC)    /* 60 ms/frame */
+#define RECORD_TIMESTAMP_SAMPLE_NUM  (RECORD_MSEC_PER_FRAME*RECORD_SAMPLE_RATE/MSEC_PER_SEC)    /* 60 ms/frame */
 #define RECORD_OPUS_FRAME_BUF_SIZE   (1000)
 
 
@@ -1548,7 +1548,7 @@ static void *janus_safievoice_handler(void *data) {
 				"%s\r\n" \
 				"m=audio 1 RTP/SAVPF %d\r\n"		/* Opus payload type */ \
 				"c=IN IP4 1.1.1.1\r\n" \
-				"a=rtpmap:%d opus/48000/2\r\n"		/* Opus payload type */ \
+				"a=rtpmap:%d opus/%d/%d\r\n"		/* Opus payload type */ \
 				"a=sendrecv\r\n"					/* This plugin doesn't send any frames */
 				,
 				session->sdp_sessid,
@@ -1560,7 +1560,9 @@ static void *janus_safievoice_handler(void *data) {
 				"",
 #endif
 				opus_pt,						/* Opus payload type */
-				opus_pt                         /* Opus payload type */
+				opus_pt,                         /* Opus payload type */
+				RECORD_SAMPLE_RATE, 
+				RECORD_CHANNEL_NUM
 				);
 
 #ifdef HAVE_SCTP
