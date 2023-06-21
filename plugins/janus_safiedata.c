@@ -475,12 +475,14 @@ struct janus_plugin_result *janus_safiedata_handle_message(janus_plugin_session 
 	json_t *request = json_object_get(message, "request");
 	const char *request_text = json_string_value(request);
 	if(!strcasecmp(request_text, "send_text")) {
-		json_t *device_msg_json = json_object_get(message, "text");
+		json_t *device_msg_json = json_object_get(message, "packet");
 		const char *device_msg_str = json_string_value(device_msg_json);
+		json_t *label_json = json_object_get(message, "label");
+		const char *label_str = json_string_value(label_json);
 		json_t *event = json_object();
 		if(gateway != NULL && g_atomic_int_get(&session->dataready)) {
 			janus_plugin_data data = {
-				.label = "device_info",
+				.label = label_str,
 				.protocol = NULL,
 				.binary = FALSE,
 				.buffer = device_msg_str,
@@ -627,6 +629,15 @@ void janus_safiedata_data_ready(janus_plugin_session *handle) {
 	if(g_atomic_int_compare_and_exchange(&session->dataready, 0, 1)) {
 		JANUS_LOG(LOG_WARN, "[%s-%p] Data channel available\n", JANUS_SAFIEDATA_PACKAGE, handle);
 	}
+
+	/* Prepare JSON event */
+	json_t *event = json_object();
+	json_object_set_new(event, "safiedata", json_string("event"));
+	json_object_set_new(event, "status", json_string("ready"));
+	int ret = gateway->push_event(handle, &janus_safiedata_plugin, NULL, event, NULL);
+	JANUS_LOG(LOG_VERB, "  >> Pushing event: %d (%s)\n", ret, janus_get_api_error(ret));
+	json_decref(event);
+
 }
 
 void janus_safiedata_slow_link(janus_plugin_session *handle, int uplink, int video) {
