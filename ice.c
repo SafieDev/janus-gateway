@@ -48,6 +48,8 @@ uint16_t janus_ice_get_stun_port(void) {
 
 
 /* TURN server/port and credentials, if any */
+static char *janus_turn_type_name = NULL;
+static char *janus_turn_server_host_name = NULL;
 static char *janus_turn_server = NULL;
 static uint16_t janus_turn_port = 0;
 static char *janus_turn_user = NULL, *janus_turn_pwd = NULL;
@@ -58,6 +60,18 @@ char *janus_ice_get_turn_server(void) {
 }
 uint16_t janus_ice_get_turn_port(void) {
 	return janus_turn_port;
+}
+char *janus_ice_get_turn_server_host_name(void) {
+	return janus_turn_server_host_name;
+}
+char *janus_ice_get_turn_user(void) {
+	return janus_turn_user;
+}
+char *janus_ice_get_turn_pwd(void) {
+	return janus_turn_pwd;
+}
+char *janus_ice_get_turn_type_name(void) {
+	return janus_turn_type_name;
 }
 
 
@@ -1167,6 +1181,25 @@ int janus_ice_set_turn_server(gchar *turn_server, uint16_t turn_port, gchar *tur
 		JANUS_LOG(LOG_ERR, "Unsupported relay type '%s'...\n", turn_type);
 		return -1;
 	}
+
+	if (janus_turn_server_host_name 
+		&& janus_turn_port
+		&& janus_turn_type_name
+		&& janus_turn_user
+		&& janus_turn_pwd)
+	{
+		if (!strcasecmp(turn_server, janus_turn_server_host_name)
+			&& turn_port == janus_turn_port
+			&& !strcasecmp(turn_type, janus_turn_type_name)
+			&& !strcasecmp(turn_user, janus_turn_user)
+			&& !strcasecmp(turn_pwd, janus_turn_pwd)
+		)
+		{
+			JANUS_LOG(LOG_INFO, "same TURN info has been set\n");
+			return 0;
+		}
+	}
+
 	/* Resolve address to get an IP */
 	struct addrinfo *res = NULL;
 	janus_network_address addr;
@@ -1180,6 +1213,9 @@ int janus_ice_set_turn_server(gchar *turn_server, uint16_t turn_port, gchar *tur
 		return -1;
 	}
 	freeaddrinfo(res);
+
+	JANUS_LOG(LOG_INFO, "getaddrinfo done\n");
+
 	g_free(janus_turn_server);
 	janus_turn_server = g_strdup(janus_network_address_string_from_buffer(&addr_buf));
 	if(janus_turn_server == NULL) {
@@ -1187,7 +1223,7 @@ int janus_ice_set_turn_server(gchar *turn_server, uint16_t turn_port, gchar *tur
 		return -1;
 	}
 	janus_turn_port = turn_port;
-	JANUS_LOG(LOG_VERB, "  >> %s:%u\n", janus_turn_server, janus_turn_port);
+	JANUS_LOG(LOG_INFO, "  >> %s:%u\n", janus_turn_server, janus_turn_port);
 	g_free(janus_turn_user);
 	janus_turn_user = NULL;
 	if(turn_user)
@@ -1196,6 +1232,8 @@ int janus_ice_set_turn_server(gchar *turn_server, uint16_t turn_port, gchar *tur
 	janus_turn_pwd = NULL;
 	if(turn_pwd)
 		janus_turn_pwd = g_strdup(turn_pwd);
+	janus_turn_type_name = g_strdup(turn_type);
+	janus_turn_server_host_name = g_strdup(turn_server);
 	return 0;
 }
 
