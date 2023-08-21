@@ -4346,6 +4346,14 @@ gint main(int argc, char *argv[])
 		/* We close stdin/stdout/stderr when initializing the logger */
 	}
 
+	const char *cwd = (args_info.cwd_path_given) ? args_info.cwd_path_arg : "/";
+	char default_plugins_folder[255];
+	memset(default_plugins_folder, 0, 255);
+	g_snprintf(default_plugins_folder, 255, "%s/%s", cwd, "plugins");
+	char default_transports_folder[255];
+	memset(default_transports_folder, 0, 255);
+	g_snprintf(default_transports_folder, 255, "%s/%s", cwd, "transports");
+
 	/* Was a custom instance name provided? */
 	if(args_info.server_name_given) {
 		janus_config_add(config, config_general, janus_config_item_create("server_name", args_info.server_name_arg));
@@ -5404,8 +5412,16 @@ gint main(int argc, char *argv[])
 	JANUS_LOG(LOG_WARN, "Plugins folder: %s\n", path);
 	dir = opendir(path);
 	if(!dir) {
-		JANUS_LOG(LOG_FATAL, "\tCouldn't access plugins folder...\n");
-		exit(1);
+		JANUS_LOG(LOG_ERR, "\tCouldn't access plugins folder...\n");
+
+		path = default_plugins_folder;
+		JANUS_LOG(LOG_WARN, "Plugins default folder: %s\n", path);
+		dir = opendir(path);
+
+		if(!dir) {
+			JANUS_LOG(LOG_FATAL, "\tCouldn't access plugins default folder...\n");
+			exit(1);
+		}
 	}
 	/* Any plugin to ignore? */
 	gchar **disabled_plugins = NULL;
@@ -5527,8 +5543,16 @@ gint main(int argc, char *argv[])
 	JANUS_LOG(LOG_WARN, "Transport plugins folder: %s\n", path);
 	dir = opendir(path);
 	if(!dir) {
-		JANUS_LOG(LOG_FATAL, "\tCouldn't access transport plugins folder...\n");
-		exit(1);
+		JANUS_LOG(LOG_ERR, "\tCouldn't access transport plugins folder...\n");
+
+		path = default_transports_folder;
+		JANUS_LOG(LOG_WARN, "Transport plugins default folder: %s\n", path);
+		dir = opendir(path);
+
+		if (!dir) {
+			JANUS_LOG(LOG_FATAL, "\tCouldn't access transport plugins default folder...\n");
+			exit(1);
+		}
 	}
 	/* Any transport to ignore? */
 	gchar **disabled_transports = NULL;
