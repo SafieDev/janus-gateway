@@ -453,71 +453,6 @@ struct janus_plugin_result *janus_safiedata_handle_message(janus_plugin_session 
 	janus_mutex_unlock(&sessions_mutex);
 
 
-#if 1
-	/* Handle request */
-	if(message == NULL) {
-		return janus_plugin_result_new(JANUS_PLUGIN_ERROR, "No message??", NULL);
-	}
-	if(!json_is_object(message)) {
-		return janus_plugin_result_new(JANUS_PLUGIN_ERROR, "message JSON error: not an object", NULL);
-	}
-
-	/* Get the request first */
-	static int error_code = 0;
-	static char error_cause[512];
-	JANUS_VALIDATE_JSON_OBJECT(message, request_parameters,
-		error_code, error_cause, TRUE,
-		JANUS_SAFIEDATA_ERROR_MISSING_ELEMENT, JANUS_SAFIEDATA_ERROR_INVALID_ELEMENT);
-	if(error_code != 0) {
-		return janus_plugin_result_new(JANUS_PLUGIN_ERROR, error_cause, NULL);
-	}
-
-	json_t *request = json_object_get(message, "request");
-	const char *request_text = json_string_value(request);
-	if(!strcasecmp(request_text, "send_text")) {
-		json_t *device_msg_json = json_object_get(message, "packet");
-		const char *device_msg_str = json_string_value(device_msg_json);
-		json_t *label_json = json_object_get(message, "label");
-		const char *label_str = json_string_value(label_json);
-		json_t *event = json_object();
-		if(gateway != NULL && g_atomic_int_get(&session->dataready)) {
-			janus_plugin_data data = {
-				.label = label_str,
-				.protocol = NULL,
-				.binary = FALSE,
-				.buffer = device_msg_str,
-				.length = strlen(device_msg_str)
-			};
-			gateway->relay_data(session->handle, &data);
-			json_object_set_new(event, "send_ok", json_true());
-			JANUS_LOG(LOG_VERB, "[safiedata] send_device_msg ok: %s\n", device_msg_str);
-		} else {
-			json_object_set_new(event, "send_ok", json_false());
-			JANUS_LOG(LOG_VERB, "[safiedata] send_device_msg failed: %s\n", device_msg_str);
-		}
-		return janus_plugin_result_new(JANUS_PLUGIN_OK, NULL, event);
-	} else if(!strcasecmp(request_text, "info")) {
-		/* Get info of session */
-		JANUS_LOG(LOG_VERB, "[safiedata] Get info of session\n");
-
-		json_t *event = json_object();
-		json_object_set_new(event, "safiedata", json_string("info"));
-		if (session->started) {
-			json_object_set_new(event, "started", json_true());
-			gint64 now = janus_get_monotonic_time();
-			json_object_set_new(event, "time_from_start", json_integer(now - session->start_time));
-		} else {
-			json_object_set_new(event, "started", json_false());
-			json_object_set_new(event, "time_from_start", json_integer(0));
-		}
-		json_object_set_new(event, "stopping", session->stopping ? json_true() : json_false());
-		json_object_set_new(event, "hangingup", json_integer(g_atomic_int_get(&session->hangingup)));
-		json_object_set_new(event, "destroyed", json_integer(g_atomic_int_get(&session->destroyed)));
-
-		return janus_plugin_result_new(JANUS_PLUGIN_OK, NULL, event);
-	}
-#endif
-
 	janus_safiedata_message *msg = g_malloc(sizeof(janus_safiedata_message));
 	msg->handle = handle;
 	msg->transaction = transaction;
@@ -751,6 +686,44 @@ static void *janus_safiedata_handler(void *data) {
 				json_object_set_new(info, "event", json_string("starting"));
 				gateway->notify_event(&janus_safiedata_plugin, session->handle, info);
 			}
+		} else if(!strcasecmp(request_text, "send_text")) {
+			json_t *device_msg_json = json_object_get(root, "packet");
+			const char *device_msg_str = json_string_value(device_msg_json);
+			json_t *label_json = json_object_get(root, "label");
+			const char *label_str = json_string_value(label_json);
+			event = json_object();
+			if(gateway != NULL && g_atomic_int_get(&session->dataready)) {
+				janus_plugin_data data = {
+					.label = label_str,
+					.protocol = NULL,
+					.binary = FALSE,
+					.buffer = device_msg_str,
+					.length = strlen(device_msg_str)
+				};
+				gateway->relay_data(session->handle, &data);
+				json_object_set_new(event, "send_ok", json_true());
+				JANUS_LOG(LOG_VERB, "[safiedata] send_device_msg ok: %s\n", device_msg_str);
+			} else {
+				json_object_set_new(event, "send_ok", json_false());
+				JANUS_LOG(LOG_VERB, "[safiedata] send_device_msg failed: %s\n", device_msg_str);
+			}
+		} else if(!strcasecmp(request_text, "info")) {
+			/* Get info of session */
+			JANUS_LOG(LOG_VERB, "[safiedata] Get info of session\n");
+
+			json_t *event = json_object();
+			json_object_set_new(event, "safiedata", json_string("info"));
+			if (session->started) {
+				json_object_set_new(event, "started", json_true());
+				gint64 now = janus_get_monotonic_time();
+				json_object_set_new(event, "time_from_start", json_integer(now - session->start_time));
+			} else {
+				json_object_set_new(event, "started", json_false());
+				json_object_set_new(event, "time_from_start", json_integer(0));
+			}
+			json_object_set_new(event, "stopping", session->stopping ? json_true() : json_false());
+			json_object_set_new(event, "hangingup", json_integer(g_atomic_int_get(&session->hangingup)));
+			json_object_set_new(event, "destroyed", json_integer(g_atomic_int_get(&session->destroyed)));
 		} else {
 			JANUS_LOG(LOG_ERR, "Unknown request '%s'\n", request_text);
 			error_code = JANUS_SAFIEDATA_ERROR_INVALID_REQUEST;
