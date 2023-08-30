@@ -351,6 +351,18 @@ AC_ARG_ENABLE([systemd-sockets],
                               [Enable Systemd Unix Sockets management])],
               [],
               [enable_systemd_sockets=no])
+			  
+AC_ARG_ENABLE([search-libressl],
+              [AS_HELP_STRING([--disable-search-libressl],
+                              [Disable search LibreSSL])],
+              [],
+              [enable_search_libressl=maybe])
+			  
+AC_ARG_ENABLE([link-usrsctp-shared],
+              [AS_HELP_STRING([--disable-link-usrsctp-shared],
+                              [Link static usrsctp library])],
+              [],
+              [enable_link_usrsctp_shared=maybe])
 
 case "$host_os" in
 freebsd*)
@@ -404,10 +416,15 @@ AS_IF([test "x$enable_pthread_mutex" = "xyes"],
       ])
 AM_CONDITIONAL([ENABLE_PTHREAD_MUTEX], [test "x$enable_pthread_mutex" = "xyes"])
 
+
+AS_IF([test "x$enable_search_libressl" != "xno"],
+      [
 AC_SEARCH_LIBS([tls_config_set_ca_mem],[tls],
              [AM_CONDITIONAL([LIBRESSL_DETECTED], true)],
              [AM_CONDITIONAL([LIBRESSL_DETECTED], false)]
              )
+      ],[AM_CONDITIONAL([LIBRESSL_DETECTED], false)])
+
 
 AC_CHECK_LIB([nice],
              [nice_agent_set_port_range],
@@ -465,11 +482,16 @@ AC_CHECK_LIB([usrsctp],
              [usrsctp_finish],
              [
                AS_IF([test "x$enable_data_channels" != "xno"],
+               AS_IF([test "x$enable_link_usrsctp_shared" != "xno"],
                [
                   AC_DEFINE(HAVE_SCTP)
                   JANUS_MANUAL_LIBS="${JANUS_MANUAL_LIBS} -lusrsctp"
                   enable_data_channels=yes
-               ])
+               ],
+               [
+                  AC_DEFINE(HAVE_SCTP)
+                  enable_data_channels=yes
+               ]))
              ],
              [
                AS_IF([test "x$enable_data_channels" = "xyes"],
