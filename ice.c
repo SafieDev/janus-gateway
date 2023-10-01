@@ -1046,8 +1046,8 @@ int janus_ice_test_stun_server(janus_network_address *addr, uint16_t port,
 	fd_set readfds;
 	FD_ZERO(&readfds);
 	FD_SET(fd, &readfds);
-	timeout.tv_sec = 5;	/* FIXME Don't wait forever */
-	timeout.tv_usec = 0;
+	timeout.tv_sec = 0;	/* FIXME Don't wait forever */
+	timeout.tv_usec = 500000;
 	int err = select(fd+1, &readfds, NULL, NULL, &timeout);
 	if(err < 0) {
 		JANUS_LOG(LOG_FATAL, "Error waiting for a response to our STUN BINDING test: %d (%s)\n", errno, g_strerror(errno));
