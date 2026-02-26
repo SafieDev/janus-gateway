@@ -48,6 +48,8 @@
 #define JANUS_AUTHOR			"Meetecho s.r.l."
 #define JANUS_SERVER_NAME		"MyJanusInstance"
 
+#define RETRY_STUN_INTERVAL_MSEC (60 * 1000)
+
 #ifdef __MACH__
 #define SHLIB_EXT "0.dylib"
 #else
@@ -86,6 +88,7 @@ janus_mutex counters_mutex;
 /* STUN Server */
 static char *conf_stun_server = NULL;
 static uint16_t conf_stun_port = 0;
+static gint64 last_stun_failed_boot_msec = 0;
 
 /* API secrets */
 static char *api_secret = NULL, *admin_api_secret = NULL;
@@ -1098,10 +1101,16 @@ int janus_process_incoming_request(janus_request *request) {
 		}
 
 		/* update info of STUN */
-		if (conf_stun_server) {
-			JANUS_LOG(LOG_FATAL, "Retry STUN Server\n");
+		gint64 now_boot_msec = janus_get_boot_time() / 1000;
+		if (conf_stun_server
+			&& (last_stun_failed_boot_msec == 0 
+				|| (now_boot_msec - last_stun_failed_boot_msec) > RETRY_STUN_INTERVAL_MSEC)) 
+		{
+			JANUS_LOG(LOG_FATAL, "Retry STUN Server, last failed=%" PRId64 ", diff =%" PRId64 "\n", 
+				last_stun_failed_boot_msec, now_boot_msec - last_stun_failed_boot_msec);
 			if(janus_ice_set_stun_server(conf_stun_server, conf_stun_port) < 0) {
 				JANUS_LOG(LOG_FATAL, "Invalid STUN address %s:%u\n", conf_stun_server, conf_stun_port);
+				last_stun_failed_boot_msec = now_boot_msec;
 			}
 		}
 

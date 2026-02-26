@@ -31,6 +31,10 @@ struct janus_json_parameter {
 	unsigned int flags;
 };
 
+/*! \brief Helper to retrieve the system boot time
+ * @returns The system boot time */
+gint64 janus_get_boot_time(void);
+
 /*! \brief Helper to retrieve the system monotonic time, as Glib's
  * g_get_monotonic_time may not be available (only since 2.28)
  * @returns The system monotonic time */
