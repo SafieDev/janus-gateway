@@ -1088,7 +1088,7 @@ int janus_process_incoming_request(janus_request *request) {
 			json_t *o_pwd  = json_object_get(turn, "credential");
 			char * turn_pwd = o_pwd ? json_string_value(o_pwd) : NULL;
 			if (turn_server && turn_port && turn_user && turn_pwd) {
-				JANUS_LOG(LOG_FATAL, "try to set turn_server=%s, turn_port=%d, turn_type=%s, turn_user=%s, turn_pwd=%s\n", 
+				JANUS_LOG(LOG_INFO, "try to set turn_server=%s, turn_port=%d, turn_type=%s, turn_user=%s, turn_pwd=%s\n", 
 						turn_server, turn_port, turn_type, turn_user, turn_pwd);
 
 				if(janus_ice_set_turn_server(turn_server, turn_port, turn_type, turn_user, turn_pwd) < 0) {
@@ -1106,11 +1106,21 @@ int janus_process_incoming_request(janus_request *request) {
 			&& (last_stun_failed_boot_msec == 0 
 				|| (now_boot_msec - last_stun_failed_boot_msec) > RETRY_STUN_INTERVAL_MSEC)) 
 		{
-			JANUS_LOG(LOG_FATAL, "Retry STUN Server, last failed=%" PRId64 ", diff =%" PRId64 "\n", 
+			int level = LOG_INFO;
+			if (last_stun_failed_boot_msec > 0)
+			{
+				level = LOG_FATAL;
+			}
+			JANUS_LOG(level, "Retry STUN Server, last failed=%" PRId64 ", diff =%" PRId64 "\n", 
 				last_stun_failed_boot_msec, now_boot_msec - last_stun_failed_boot_msec);
 			if(janus_ice_set_stun_server(conf_stun_server, conf_stun_port) < 0) {
 				JANUS_LOG(LOG_FATAL, "Invalid STUN address %s:%u\n", conf_stun_server, conf_stun_port);
 				last_stun_failed_boot_msec = now_boot_msec;
+			}
+			else
+			{
+				last_stun_failed_boot_msec = 0;
+				JANUS_LOG(level, "STUN Server set to %s:%u\n", conf_stun_server, conf_stun_port);
 			}
 		}
 
