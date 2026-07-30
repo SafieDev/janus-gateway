@@ -22,6 +22,10 @@
 #include <signal.h>
 #include <getopt.h>
 #include <sys/resource.h>
+#include <unistd.h>
+#ifdef __linux__
+#include <sys/prctl.h>
+#endif
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -4187,6 +4191,19 @@ gboolean janus_plugin_auth_signature_contains(janus_plugin *plugin, const char *
 /* Main */
 gint main(int argc, char *argv[])
 {
+#ifdef __linux__
+	/* Die together with our parent (the webrtc edge app). If webrtc exits or
+	 * is SIGKILL'd, the kernel sends us SIGKILL too, instead of leaving this
+	 * janus orphaned to init and running forever. On long WAN-offline runs
+	 * such orphaned janus (and their unreaped children) accumulate until the
+	 * process/thread limit is exhausted. getppid()==1 closes the race where
+	 * the parent already died before PDEATHSIG was armed. */
+	prctl(PR_SET_PDEATHSIG, SIGKILL);
+	if(getppid() == 1) {
+		exit(1);
+	}
+#endif
+
 	/* Core dumps may be disallowed by parent of this process; change that */
 	struct rlimit core_limits;
 	core_limits.rlim_cur = core_limits.rlim_max = RLIM_INFINITY;
