@@ -52,6 +52,12 @@ static char *janus_turn_type_name = NULL;
 static char *janus_turn_server_host_name = NULL;
 static char *janus_turn_server = NULL;
 static uint16_t janus_turn_port = 0;
+/* 最後に TURN サーバのアドレスを解決した時刻(monotonic, usec)。0 = 未解決。
+   同一設定でも TTL 経過後は DNS を再解決するために使う。 */
+static gint64 janus_turn_resolved_monotonic = 0;
+/* TURN サーバ名を再解決する間隔。janus プロセスは数週間生き続けるため、
+   TURN サーバ入れ替え(DNS 変更)に追従できないと古い IP を掴み続けてしまう。 */
+#define JANUS_TURN_DNS_TTL_SEC 300
 static char *janus_turn_user = NULL, *janus_turn_pwd = NULL;
 static NiceRelayType janus_turn_type = NICE_RELAY_TYPE_TURN_UDP;
 
@@ -1182,7 +1188,11 @@ int janus_ice_set_turn_server(gchar *turn_server, uint16_t turn_port, gchar *tur
 		return -1;
 	}
 
-	if (janus_turn_server_host_name 
+	/* 設定が同一かどうかと、DNS を再解決すべきかどうかは別問題として扱う。
+	   以前は同一設定なら常に早期 return していたため、TURN サーバが入れ替わって
+	   DNS から旧アドレスが削除されても、稼働中の janus は古い IP を掴み続けていた。 */
+	gboolean same_turn_info = FALSE;
+	if (janus_turn_server_host_name
 		&& janus_turn_port
 		&& janus_turn_type_name
 		&& janus_turn_user
@@ -1195,9 +1205,21 @@ int janus_ice_set_turn_server(gchar *turn_server, uint16_t turn_port, gchar *tur
 			&& !strcasecmp(turn_pwd, janus_turn_pwd)
 		)
 		{
-			JANUS_LOG(LOG_INFO, "same TURN info has been set\n");
-			return 0;
+			same_turn_info = TRUE;
 		}
+	}
+
+	gint64 now_monotonic = janus_get_monotonic_time();
+	if (same_turn_info
+		&& janus_turn_server != NULL
+		&& janus_turn_resolved_monotonic > 0
+		&& (now_monotonic - janus_turn_resolved_monotonic) <
+			(gint64)JANUS_TURN_DNS_TTL_SEC * G_USEC_PER_SEC)
+	{
+		JANUS_LOG(LOG_INFO, "same TURN info has been set (resolved %" G_GINT64_FORMAT "s ago, keep %s:%u)\n",
+			(now_monotonic - janus_turn_resolved_monotonic) / G_USEC_PER_SEC,
+			janus_turn_server, janus_turn_port);
+		return 0;
 	}
 
 	/* Resolve address to get an IP */
@@ -1210,18 +1232,31 @@ int janus_ice_set_turn_server(gchar *turn_server, uint16_t turn_port, gchar *tur
 		JANUS_LOG(LOG_ERR, "Could not resolve %s...\n", turn_server);
 		if(res)
 			freeaddrinfo(res);
+		if(same_turn_info && janus_turn_server != NULL) {
+			/* 設定は変わっておらず、以前に解決したアドレスがある。DNS の一時障害で
+			   セッション作成を失敗させないよう、既存アドレスを維持して成功扱いにする。 */
+			JANUS_LOG(LOG_WARN, "keep previously resolved TURN address %s:%u\n",
+				janus_turn_server, janus_turn_port);
+			return 0;
+		}
 		return -1;
 	}
 	freeaddrinfo(res);
 
 	JANUS_LOG(LOG_INFO, "getaddrinfo done\n");
 
+	const char *resolved = janus_network_address_string_from_buffer(&addr_buf);
+	if(janus_turn_server != NULL && resolved != NULL && strcmp(janus_turn_server, resolved) != 0) {
+		JANUS_LOG(LOG_INFO, "TURN address of %s changed: %s -> %s\n",
+			turn_server, janus_turn_server, resolved);
+	}
 	g_free(janus_turn_server);
-	janus_turn_server = g_strdup(janus_network_address_string_from_buffer(&addr_buf));
+	janus_turn_server = g_strdup(resolved);
 	if(janus_turn_server == NULL) {
 		JANUS_LOG(LOG_ERR, "Could not resolve %s...\n", turn_server);
 		return -1;
 	}
+	janus_turn_resolved_monotonic = now_monotonic;
 	janus_turn_port = turn_port;
 	JANUS_LOG(LOG_INFO, "  >> %s:%u\n", janus_turn_server, janus_turn_port);
 	g_free(janus_turn_user);
