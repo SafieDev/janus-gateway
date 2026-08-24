@@ -1267,7 +1267,10 @@ int janus_ice_set_turn_server(gchar *turn_server, uint16_t turn_port, gchar *tur
 	janus_turn_pwd = NULL;
 	if(turn_pwd)
 		janus_turn_pwd = g_strdup(turn_pwd);
+	/* 旧値を解放せずに g_strdup していたため、TURN 設定が変わる度にリークしていた */
+	g_free(janus_turn_type_name);
 	janus_turn_type_name = g_strdup(turn_type);
+	g_free(janus_turn_server_host_name);
 	janus_turn_server_host_name = g_strdup(turn_server);
 	return 0;
 }
