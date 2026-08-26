@@ -69,13 +69,22 @@ static uint16_t janus_turn_port = 0;
    ただしこの状態では上記のブロックが create ごとに起きる点は残っている
    (DNS 障害が janus 起動直後と重なった場合に限られる)。 */
 static gint64 janus_turn_attempted_monotonic = 0;
-/* 差し替え前の janus_turn_server を 1 世代だけ保持する。
-   janus_turn_server / user / pwd は janus_ice_setup_local() から
-   nice_agent_set_relay_info() へ渡され、これは requests スレッドとは別の
-   タスクプールスレッドで動く。解放と再代入の隙間で読まれると use-after-free に
-   なるため、変更時は旧ポインタを即解放せず次の変更まで持ち越す。
-   保持するのは常に 1 本だけなのでリークにはならない。 */
+/* 差し替え前のポインタを 1 世代だけ保持する。
+   janus_turn_server / janus_turn_user / janus_turn_pwd は janus_ice_setup_local() から
+   nice_agent_set_relay_info() へ渡され(ice.c の同関数内)、これは create を処理する
+   requests スレッドとは別のタスクプールスレッドで動く。解放と再代入の隙間で読まれると
+   use-after-free になるため、変更時は旧ポインタを即解放せず次の変更まで持ち越す。
+   janus_turn_type_name / janus_turn_server_host_name は現状 requests スレッド内の
+   比較にしか使わないが、公開アクセサ(janus_ice_get_turn_*)があり将来別スレッドから
+   読まれうるため同じ扱いに揃える。
+   各ポインタにつき保持は常に 1 本だけなのでリークにはならない。
+   nice_agent_set_relay_info は渡された文字列を内部で複製するため、読み出しの寿命は
+   その呼び出し中に限られる。1 世代あれば十分。 */
 static char *janus_turn_server_prev = NULL;
+static char *janus_turn_user_prev = NULL;
+static char *janus_turn_pwd_prev = NULL;
+static char *janus_turn_type_name_prev = NULL;
+static char *janus_turn_server_host_name_prev = NULL;
 /* TURN サーバ名を再解決する間隔。janus プロセスは数週間生き続けるため、
    TURN サーバ入れ替え(DNS 変更)に追従できないと古い IP を掴み続けてしまう。 */
 #define JANUS_TURN_DNS_TTL_SEC 300
@@ -1312,19 +1321,33 @@ int janus_ice_set_turn_server(gchar *turn_server, uint16_t turn_port, gchar *tur
 	   nice_agent_set_relay_info() へ渡されるため競合の窓になる。変わったときだけ更新する。
 	   (旧実装は解放せずに g_strdup していたため、変わる度にリークもしていた) */
 	if(!same_turn_info) {
+		/* いずれも別スレッドから読まれうるため即解放せず 1 世代持ち越す(上の宣言参照)。
+		   確保に失敗した場合は旧ポインタを維持したまま先へ進む(NULL を掴ませない)。 */
 		janus_turn_port = turn_port;
-		g_free(janus_turn_user);
-		janus_turn_user = NULL;
-		if(turn_user)
-			janus_turn_user = g_strdup(turn_user);
-		g_free(janus_turn_pwd);
-		janus_turn_pwd = NULL;
-		if(turn_pwd)
-			janus_turn_pwd = g_strdup(turn_pwd);
-		g_free(janus_turn_type_name);
-		janus_turn_type_name = g_strdup(turn_type);
-		g_free(janus_turn_server_host_name);
-		janus_turn_server_host_name = g_strdup(turn_server);
+		char *newUser = turn_user ? g_strdup(turn_user) : NULL;
+		if(turn_user == NULL || newUser != NULL) {
+			g_free(janus_turn_user_prev);
+			janus_turn_user_prev = janus_turn_user;
+			janus_turn_user = newUser;
+		}
+		char *newPwd = turn_pwd ? g_strdup(turn_pwd) : NULL;
+		if(turn_pwd == NULL || newPwd != NULL) {
+			g_free(janus_turn_pwd_prev);
+			janus_turn_pwd_prev = janus_turn_pwd;
+			janus_turn_pwd = newPwd;
+		}
+		char *newTypeName = g_strdup(turn_type);
+		if(newTypeName != NULL) {
+			g_free(janus_turn_type_name_prev);
+			janus_turn_type_name_prev = janus_turn_type_name;
+			janus_turn_type_name = newTypeName;
+		}
+		char *newHostName = g_strdup(turn_server);
+		if(newHostName != NULL) {
+			g_free(janus_turn_server_host_name_prev);
+			janus_turn_server_host_name_prev = janus_turn_server_host_name;
+			janus_turn_server_host_name = newHostName;
+		}
 	}
 	/* port の更新後に出す(初回や port 変更時に古い値を表示しないため) */
 	JANUS_LOG(LOG_INFO, "  >> %s:%u\n", janus_turn_server, janus_turn_port);
