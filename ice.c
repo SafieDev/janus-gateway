@@ -1202,6 +1202,17 @@ int janus_ice_set_stun_server(gchar *stun_server, uint16_t stun_port) {
 	return 0;
 }
 
+/* TURN 設定の比較。NULL 同士は「同一」、片方だけ NULL は「不一致」とする。
+   資格情報を持たない TURN 構成では turn_user / turn_pwd が NULL で渡り得るため、
+   strcasecmp を直接呼ぶと NULL 参照になる。この関数内の他の箇所も
+   turn_user ? g_strdup(turn_user) : NULL のように NULL を想定しており、
+   比較だけが想定していなかった。 */
+static gboolean janus_turn_str_equal(const char *a, const char *b) {
+	if(a == NULL || b == NULL)
+		return (a == b) ? TRUE : FALSE;
+	return (strcasecmp(a, b) == 0) ? TRUE : FALSE;
+}
+
 int janus_ice_set_turn_server(gchar *turn_server, uint16_t turn_port, gchar *turn_type, gchar *turn_user, gchar *turn_pwd) {
 	if(turn_server == NULL)
 		return 0;	/* No initialization needed */
@@ -1224,18 +1235,19 @@ int janus_ice_set_turn_server(gchar *turn_server, uint16_t turn_port, gchar *tur
 	/* 設定が同一かどうかと、DNS を再解決すべきかどうかは別問題として扱う。
 	   以前は同一設定なら常に早期 return していたため、TURN サーバが入れ替わって
 	   DNS から旧アドレスが削除されても、稼働中の janus は古い IP を掴み続けていた。 */
+	/* 「保存済みか」は host_name / port / type_name で判定する。user / pwd を
+	   条件に含めると、資格情報を持たない TURN 構成で same_turn_info が常に偽になり、
+	   TTL による再解決スキップも「変わらなければ差し替えない」も効かなくなる。 */
 	gboolean same_turn_info = FALSE;
 	if (janus_turn_server_host_name
 		&& janus_turn_port
-		&& janus_turn_type_name
-		&& janus_turn_user
-		&& janus_turn_pwd)
+		&& janus_turn_type_name)
 	{
-		if (!strcasecmp(turn_server, janus_turn_server_host_name)
+		if (janus_turn_str_equal(turn_server, janus_turn_server_host_name)
 			&& turn_port == janus_turn_port
-			&& !strcasecmp(turn_type, janus_turn_type_name)
-			&& !strcasecmp(turn_user, janus_turn_user)
-			&& !strcasecmp(turn_pwd, janus_turn_pwd)
+			&& janus_turn_str_equal(turn_type, janus_turn_type_name)
+			&& janus_turn_str_equal(turn_user, janus_turn_user)
+			&& janus_turn_str_equal(turn_pwd, janus_turn_pwd)
 		)
 		{
 			same_turn_info = TRUE;
