@@ -1269,13 +1269,12 @@ int janus_ice_set_turn_server(gchar *turn_server, uint16_t turn_port, gchar *tur
 			   設定が変わっていても待たせるが、TURN アドレスが無い状態では relay 候補を
 			   出せず挙動は変わらないため、遅延は最大 JANUS_TURN_DNS_RETRY_SEC で済む。 */
 			if (from_last_attempt < (gint64)JANUS_TURN_DNS_RETRY_SEC * G_USEC_PER_SEC) {
-				/* 意図したバックオフであり異常ではない。呼び出し元(janus.c)は戻り値が
-				   負なら LOG_FATAL を出すため、-1 を返すと create ごとに致命的エラーの
-				   ログが出て誤検知になる。この分岐は状態を何も変えないので、
-				   アドレスを保持できたソフトフェイルと同じく 0 を返す。 */
+				/* 意図したバックオフであり異常ではない。専用の戻り値で「未解決だが
+				   エラーではない」ことを表す。0 を返すと TURN が設定できたと誤解され、
+				   -1 を返すと呼び出し元が致命的エラーとして扱ってしまう。 */
 				JANUS_LOG(LOG_WARN, "TURN address of %s is not resolved yet (last resolve attempt %" G_GINT64_FORMAT "s ago), skip retry\n",
 					turn_server, from_last_attempt / G_USEC_PER_SEC);
-				return 0;
+				return JANUS_ICE_TURN_RETRY_LATER;
 			}
 		}
 		/* 解決済みアドレスを持っていて設定が変わった場合はここに落ち、即座に再解決する。 */
