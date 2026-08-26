@@ -1269,9 +1269,13 @@ int janus_ice_set_turn_server(gchar *turn_server, uint16_t turn_port, gchar *tur
 			   設定が変わっていても待たせるが、TURN アドレスが無い状態では relay 候補を
 			   出せず挙動は変わらないため、遅延は最大 JANUS_TURN_DNS_RETRY_SEC で済む。 */
 			if (from_last_attempt < (gint64)JANUS_TURN_DNS_RETRY_SEC * G_USEC_PER_SEC) {
+				/* 意図したバックオフであり異常ではない。呼び出し元(janus.c)は戻り値が
+				   負なら LOG_FATAL を出すため、-1 を返すと create ごとに致命的エラーの
+				   ログが出て誤検知になる。この分岐は状態を何も変えないので、
+				   アドレスを保持できたソフトフェイルと同じく 0 を返す。 */
 				JANUS_LOG(LOG_WARN, "TURN address of %s is not resolved yet (last resolve attempt %" G_GINT64_FORMAT "s ago), skip retry\n",
 					turn_server, from_last_attempt / G_USEC_PER_SEC);
-				return -1;
+				return 0;
 			}
 		}
 		/* 解決済みアドレスを持っていて設定が変わった場合はここに落ち、即座に再解決する。 */
@@ -1346,7 +1350,6 @@ int janus_ice_set_turn_server(gchar *turn_server, uint16_t turn_port, gchar *tur
 	if(!same_turn_info) {
 		/* いずれも別スレッドから読まれうるため即解放せず 1 世代持ち越す(上の宣言参照)。
 		   確保に失敗した場合は旧ポインタを維持したまま先へ進む(NULL を掴ませない)。 */
-		janus_turn_port = turn_port;
 		char *newUser = turn_user ? g_strdup(turn_user) : NULL;
 		if(turn_user == NULL || newUser != NULL) {
 			g_free(janus_turn_user_prev);
@@ -1371,6 +1374,12 @@ int janus_ice_set_turn_server(gchar *turn_server, uint16_t turn_port, gchar *tur
 			janus_turn_server_host_name_prev = janus_turn_server_host_name;
 			janus_turn_server_host_name = newHostName;
 		}
+		/* port は最後に更新する。先に更新すると、万一この上の確保が失敗した場合に
+		   「port だけ新しく user/pwd は古い」という混在状態になる。
+		   なお g_strdup は g_malloc 経由で、確保に失敗するとプロセスを abort する
+		   (g_try_strdup ではないため NULL は返らない)。したがって混在状態は実際には
+		   起こらないが、順序で保証しておく。 */
+		janus_turn_port = turn_port;
 	}
 	/* port の更新後に出す(初回や port 変更時に古い値を表示しないため) */
 	JANUS_LOG(LOG_INFO, "  >> %s:%u\n", janus_turn_server, janus_turn_port);
