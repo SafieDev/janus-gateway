@@ -1102,10 +1102,11 @@ int janus_process_incoming_request(janus_request *request) {
 			   既定するのは誤りになる。資格情報を省いたまま TURN を設定すると認証で
 			   失敗して relay が張れないため、ここでは不足を設定誤りとして扱う。 */
 			if (turn_server && turn_port && turn_user && turn_pwd) {
-				/* この分岐では turn_type だけが NULL になり得る */
+				/* この分岐では turn_type だけが NULL になり得る。
+				   turn_pwd は TURN の資格情報なのでログに出さない(存在の有無だけ残す)。 */
 				JANUS_LOG(LOG_INFO, "try to set turn_server=%s, turn_port=%d, turn_type=%s, turn_user=%s, turn_pwd=%s\n", 
 						turn_server, turn_port, turn_type ? turn_type : "(null)",
-						turn_user, turn_pwd);
+						turn_user, "***");
 
 				int turn_ret = janus_ice_set_turn_server(turn_server, turn_port, turn_type, turn_user, turn_pwd);
 				if(turn_ret == JANUS_ICE_TURN_RETRY_LATER) {
@@ -1115,12 +1116,15 @@ int janus_process_incoming_request(janus_request *request) {
 					JANUS_LOG(LOG_FATAL, "Invalid TURN address %s:%u\n", turn_server, turn_port);
 				}
 			} else {
-				/* この分岐は「いずれかが NULL」のときに通るため、全て保護する */
+				/* この分岐は「いずれかが NULL」のときに通るため、全て保護する。
+				   どのフィールドが欠けているかを示すのが目的なので、turn_pwd は
+				   値ではなく有無だけを出す。LOG_FATAL は本番の既定レベルでも
+				   出力されるため、平文の資格情報を残してはならない。 */
 				JANUS_LOG(LOG_FATAL, "failed to set turn_server=%s, turn_port=%d, turn_type=%s, turn_user=%s, turn_pwd=%s\n", 
 						turn_server ? turn_server : "(null)", turn_port,
 						turn_type ? turn_type : "(null)",
 						turn_user ? turn_user : "(null)",
-						turn_pwd ? turn_pwd : "(null)");
+						turn_pwd ? "***" : "(null)");
 			}
 		}
 

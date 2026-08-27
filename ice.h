@@ -59,9 +59,10 @@ int janus_ice_test_stun_server(janus_network_address *addr, uint16_t port, uint1
 int janus_ice_set_stun_server(gchar *stun_server, uint16_t stun_port);
 /*! \brief Return value of janus_ice_set_turn_server() meaning "not resolved yet, backing off"
  * \details The TURN server name has not been resolved in this process yet, and the
- * last resolution attempt was less than JANUS_TURN_DNS_RETRY_SEC ago, so no attempt
- * was made this time. Nothing was changed (TURN is still unconfigured). This is not
- * an error: callers must not treat it as fatal. */
+ * last resolution attempt was more recent than the configured backoff interval, so no
+ * attempt was made this time. Nothing was changed (TURN is still unconfigured). This is
+ * not an error: callers must not treat it as fatal, and may simply retry on the next
+ * call. */
 #define JANUS_ICE_TURN_RETRY_LATER	(-2)
 /*! \brief Method to force Janus to use a TURN server when gathering candidates
  * @param[in] turn_server TURN server address to use
