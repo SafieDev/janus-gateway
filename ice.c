@@ -52,6 +52,45 @@ static char *janus_turn_type_name = NULL;
 static char *janus_turn_server_host_name = NULL;
 static char *janus_turn_server = NULL;
 static uint16_t janus_turn_port = 0;
+/* 最後に TURN サーバ名の解決を試行した時刻(monotonic, usec)。0 = 未試行。
+   「最後に解決できた時刻」ではなく「最後に getaddrinfo のコストを払った時刻」であり、
+   成功・失敗で扱いを分けない。janus_ice_set_turn_server は create を処理する単一の
+   requests スレッドで動くため、リゾルバが無応答だとそのスレッドがタイムアウト分だけ
+   ブロックし、keepalive や destroy を含む janus のリクエスト処理全体が停滞する。
+   再試行の頻度に上界を与えるのがこの変数の役割。
+
+   再試行の間隔は解決済みアドレスを持っているかどうかで変える。
+   - 保持している           : JANUS_TURN_DNS_TTL_SEC。TURN は使えている状態なので、
+                              サーバ入れ替えに追従できれば足りる。
+   - 一度も解決できていない : JANUS_TURN_DNS_RETRY_SEC。TURN アドレスが無い間は
+                              nice_agent_set_relay_info を呼べず relay 候補を出せない
+                              ため早く復帰させたいが、無制限に再試行すると上記の
+                              ブロックが create ごとに起きる。短い間隔で上界を作る。 */
+static gint64 janus_turn_attempted_monotonic = 0;
+/* 差し替え前のポインタを 1 世代だけ保持する。
+   janus_turn_server / janus_turn_user / janus_turn_pwd は janus_ice_setup_local() から
+   nice_agent_set_relay_info() へ渡され(ice.c の同関数内)、これは create を処理する
+   requests スレッドとは別のタスクプールスレッドで動く。解放と再代入の隙間で読まれると
+   use-after-free になるため、変更時は旧ポインタを即解放せず次の変更まで持ち越す。
+   janus_turn_server は admin API 経路(janus_process_incoming_admin_request ->
+   janus_info -> janus_ice_get_turn_server)からも読まれる。
+   janus_turn_type_name / janus_turn_server_host_name は現状この関数内の比較にしか
+   使わない(アクセサは定義済みだが ice.h に宣言がなく呼び出し元もない)。将来
+   別スレッドから読まれても壊れないよう、予防的に扱いを揃える。
+   各ポインタにつき保持は常に 1 本だけなのでリークにはならない。
+   nice_agent_set_relay_info は渡された文字列を内部で複製するため、読み出しの寿命は
+   その呼び出し中に限られる。1 世代あれば十分。 */
+static char *janus_turn_server_prev = NULL;
+static char *janus_turn_user_prev = NULL;
+static char *janus_turn_pwd_prev = NULL;
+static char *janus_turn_type_name_prev = NULL;
+static char *janus_turn_server_host_name_prev = NULL;
+/* TURN サーバ名を再解決する間隔。janus プロセスは数週間生き続けるため、
+   TURN サーバ入れ替え(DNS 変更)に追従できないと古い IP を掴み続けてしまう。 */
+#define JANUS_TURN_DNS_TTL_SEC 300
+/* 一度も解決できていない状態での再試行間隔。TTL より短くして復帰を早めつつ、
+   requests スレッドがブロックする頻度に上界を与える(詳細は上の宣言参照)。 */
+#define JANUS_TURN_DNS_RETRY_SEC 30
 static char *janus_turn_user = NULL, *janus_turn_pwd = NULL;
 static NiceRelayType janus_turn_type = NICE_RELAY_TYPE_TURN_UDP;
 
@@ -1163,6 +1202,17 @@ int janus_ice_set_stun_server(gchar *stun_server, uint16_t stun_port) {
 	return 0;
 }
 
+/* TURN 設定の比較。NULL 同士は「同一」、片方だけ NULL は「不一致」とする。
+   資格情報を持たない TURN 構成では turn_user / turn_pwd が NULL で渡り得るため、
+   strcasecmp を直接呼ぶと NULL 参照になる。この関数内の他の箇所も
+   turn_user ? g_strdup(turn_user) : NULL のように NULL を想定しており、
+   比較だけが想定していなかった。 */
+static gboolean janus_turn_str_equal(const char *a, const char *b) {
+	if(a == NULL || b == NULL)
+		return (a == b) ? TRUE : FALSE;
+	return (strcasecmp(a, b) == 0) ? TRUE : FALSE;
+}
+
 int janus_ice_set_turn_server(gchar *turn_server, uint16_t turn_port, gchar *turn_type, gchar *turn_user, gchar *turn_pwd) {
 	if(turn_server == NULL)
 		return 0;	/* No initialization needed */
@@ -1182,23 +1232,56 @@ int janus_ice_set_turn_server(gchar *turn_server, uint16_t turn_port, gchar *tur
 		return -1;
 	}
 
-	if (janus_turn_server_host_name 
+	/* 設定が同一かどうかと、DNS を再解決すべきかどうかは別問題として扱う。
+	   以前は同一設定なら常に早期 return していたため、TURN サーバが入れ替わって
+	   DNS から旧アドレスが削除されても、稼働中の janus は古い IP を掴み続けていた。 */
+	/* 「保存済みか」は host_name / port / type_name で判定する。user / pwd を
+	   条件に含めると、資格情報を持たない TURN 構成で same_turn_info が常に偽になり、
+	   TTL による再解決スキップも「変わらなければ差し替えない」も効かなくなる。 */
+	gboolean same_turn_info = FALSE;
+	if (janus_turn_server_host_name
 		&& janus_turn_port
-		&& janus_turn_type_name
-		&& janus_turn_user
-		&& janus_turn_pwd)
+		&& janus_turn_type_name)
 	{
-		if (!strcasecmp(turn_server, janus_turn_server_host_name)
+		if (janus_turn_str_equal(turn_server, janus_turn_server_host_name)
 			&& turn_port == janus_turn_port
-			&& !strcasecmp(turn_type, janus_turn_type_name)
-			&& !strcasecmp(turn_user, janus_turn_user)
-			&& !strcasecmp(turn_pwd, janus_turn_pwd)
+			&& janus_turn_str_equal(turn_type, janus_turn_type_name)
+			&& janus_turn_str_equal(turn_user, janus_turn_user)
+			&& janus_turn_str_equal(turn_pwd, janus_turn_pwd)
 		)
 		{
-			JANUS_LOG(LOG_INFO, "same TURN info has been set\n");
-			return 0;
+			same_turn_info = TRUE;
 		}
 	}
+
+	gint64 now_monotonic = janus_get_monotonic_time();
+	gint64 from_last_attempt = now_monotonic - janus_turn_attempted_monotonic;
+	if (janus_turn_attempted_monotonic > 0) {
+		if (same_turn_info && janus_turn_server != NULL) {
+			/* 解決済みアドレスがあり設定も同一。TTL 内なら再解決しない。 */
+			if (from_last_attempt < (gint64)JANUS_TURN_DNS_TTL_SEC * G_USEC_PER_SEC) {
+				JANUS_LOG(LOG_INFO, "same TURN info has been set (last resolve attempt %" G_GINT64_FORMAT "s ago, keep %s:%u)\n",
+					from_last_attempt / G_USEC_PER_SEC, janus_turn_server, janus_turn_port);
+				return 0;
+			}
+		} else if (janus_turn_server == NULL) {
+			/* このプロセスで一度も解決できていない。再試行間隔に上界を与える。
+			   設定が変わっていても待たせるが、TURN アドレスが無い状態では relay 候補を
+			   出せず挙動は変わらないため、遅延は最大 JANUS_TURN_DNS_RETRY_SEC で済む。 */
+			if (from_last_attempt < (gint64)JANUS_TURN_DNS_RETRY_SEC * G_USEC_PER_SEC) {
+				/* 意図したバックオフであり異常ではない。専用の戻り値で「未解決だが
+				   エラーではない」ことを表す。0 を返すと TURN が設定できたと誤解され、
+				   -1 を返すと呼び出し元が致命的エラーとして扱ってしまう。 */
+				JANUS_LOG(LOG_WARN, "TURN address of %s is not resolved yet (last resolve attempt %" G_GINT64_FORMAT "s ago), skip retry\n",
+					turn_server, from_last_attempt / G_USEC_PER_SEC);
+				return JANUS_ICE_TURN_RETRY_LATER;
+			}
+		}
+		/* 解決済みアドレスを持っていて設定が変わった場合はここに落ち、即座に再解決する。 */
+	}
+
+	/* getaddrinfo のコストを払うことが確定した。結果に関わらずここで記録する。 */
+	janus_turn_attempted_monotonic = now_monotonic;
 
 	/* Resolve address to get an IP */
 	struct addrinfo *res = NULL;
@@ -1210,30 +1293,95 @@ int janus_ice_set_turn_server(gchar *turn_server, uint16_t turn_port, gchar *tur
 		JANUS_LOG(LOG_ERR, "Could not resolve %s...\n", turn_server);
 		if(res)
 			freeaddrinfo(res);
+		if(same_turn_info && janus_turn_server != NULL) {
+			/* 設定は変わっておらず、以前に解決したアドレスがある。DNS の一時障害で
+			   セッション作成を失敗させないよう、既存アドレスを維持して成功扱いにする。 */
+			JANUS_LOG(LOG_WARN, "keep previously resolved TURN address %s:%u\n",
+				janus_turn_server, janus_turn_port);
+			return 0;
+		}
+		/* 維持できる既存アドレスが無い場合は失敗として返す。次の create では
+		   JANUS_TURN_DNS_RETRY_SEC 間隔で再試行される。 */
 		return -1;
 	}
 	freeaddrinfo(res);
 
 	JANUS_LOG(LOG_INFO, "getaddrinfo done\n");
 
-	g_free(janus_turn_server);
-	janus_turn_server = g_strdup(janus_network_address_string_from_buffer(&addr_buf));
-	if(janus_turn_server == NULL) {
+	const char *resolved = janus_network_address_string_from_buffer(&addr_buf);
+	if(resolved == NULL) {
 		JANUS_LOG(LOG_ERR, "Could not resolve %s...\n", turn_server);
+		if(same_turn_info && janus_turn_server != NULL) {
+			/* 解決できなかったが設定は同一。既存アドレスを維持する。 */
+			JANUS_LOG(LOG_WARN, "keep previously resolved TURN address %s:%u\n",
+				janus_turn_server, janus_turn_port);
+			return 0;
+		}
 		return -1;
 	}
-	janus_turn_port = turn_port;
+
+	/* アドレスが変わっていなければポインタを差し替えない。
+	   TTL 経過ごとに g_free / g_strdup を繰り返すと、別スレッドの
+	   nice_agent_set_relay_info() からの読み出しと競合する窓が 300 秒ごとに再発する。
+	   差し替えを「実際に変わったときだけ」に限定して窓をなくす。 */
+	if(janus_turn_server == NULL || strcmp(janus_turn_server, resolved) != 0) {
+		char *newServer = g_strdup(resolved);
+		if(newServer == NULL) {
+			/* 確保に失敗。既存アドレスは触っていないのでそのまま使い続ける。 */
+			JANUS_LOG(LOG_ERR, "failed to store resolved address of %s\n", turn_server);
+			return -1;
+		}
+		if(janus_turn_server != NULL) {
+			JANUS_LOG(LOG_INFO, "TURN address of %s changed: %s -> %s\n",
+				turn_server, janus_turn_server, resolved);
+		}
+		/* 旧ポインタは即解放しない(読み出し中のスレッドが掴んでいる可能性がある)。
+		   1 世代だけ持ち越し、次の変更時に解放する。 */
+		g_free(janus_turn_server_prev);
+		janus_turn_server_prev = janus_turn_server;
+		janus_turn_server = newServer;
+	}
+
+	/* user / pwd / type / host は same_turn_info が真なら前回と同一と確認済み。
+	   同じ値で g_free / g_strdup を繰り返すのは無意味なうえ、これらも
+	   nice_agent_set_relay_info() へ渡されるため競合の窓になる。変わったときだけ更新する。
+	   (旧実装は解放せずに g_strdup していたため、変わる度にリークもしていた) */
+	if(!same_turn_info) {
+		/* いずれも別スレッドから読まれうるため即解放せず 1 世代持ち越す(上の宣言参照)。
+		   確保に失敗した場合は旧ポインタを維持したまま先へ進む(NULL を掴ませない)。 */
+		char *newUser = turn_user ? g_strdup(turn_user) : NULL;
+		if(turn_user == NULL || newUser != NULL) {
+			g_free(janus_turn_user_prev);
+			janus_turn_user_prev = janus_turn_user;
+			janus_turn_user = newUser;
+		}
+		char *newPwd = turn_pwd ? g_strdup(turn_pwd) : NULL;
+		if(turn_pwd == NULL || newPwd != NULL) {
+			g_free(janus_turn_pwd_prev);
+			janus_turn_pwd_prev = janus_turn_pwd;
+			janus_turn_pwd = newPwd;
+		}
+		char *newTypeName = g_strdup(turn_type);
+		if(newTypeName != NULL) {
+			g_free(janus_turn_type_name_prev);
+			janus_turn_type_name_prev = janus_turn_type_name;
+			janus_turn_type_name = newTypeName;
+		}
+		char *newHostName = g_strdup(turn_server);
+		if(newHostName != NULL) {
+			g_free(janus_turn_server_host_name_prev);
+			janus_turn_server_host_name_prev = janus_turn_server_host_name;
+			janus_turn_server_host_name = newHostName;
+		}
+		/* port は最後に更新する。先に更新すると、万一この上の確保が失敗した場合に
+		   「port だけ新しく user/pwd は古い」という混在状態になる。
+		   なお g_strdup は g_malloc 経由で、確保に失敗するとプロセスを abort する
+		   (g_try_strdup ではないため NULL は返らない)。したがって混在状態は実際には
+		   起こらないが、順序で保証しておく。 */
+		janus_turn_port = turn_port;
+	}
+	/* port の更新後に出す(初回や port 変更時に古い値を表示しないため) */
 	JANUS_LOG(LOG_INFO, "  >> %s:%u\n", janus_turn_server, janus_turn_port);
-	g_free(janus_turn_user);
-	janus_turn_user = NULL;
-	if(turn_user)
-		janus_turn_user = g_strdup(turn_user);
-	g_free(janus_turn_pwd);
-	janus_turn_pwd = NULL;
-	if(turn_pwd)
-		janus_turn_pwd = g_strdup(turn_pwd);
-	janus_turn_type_name = g_strdup(turn_type);
-	janus_turn_server_host_name = g_strdup(turn_server);
 	return 0;
 }
 

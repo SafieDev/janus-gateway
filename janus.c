@@ -1092,16 +1092,39 @@ int janus_process_incoming_request(janus_request *request) {
 			char * turn_user = o_user ? json_string_value(o_user) : NULL;
 			json_t *o_pwd  = json_object_get(turn, "credential");
 			char * turn_pwd = o_pwd ? json_string_value(o_pwd) : NULL;
+			/* turn_type は省略され得るので NULL のまま %s に渡さない。
+			   printf に NULL を渡すのは未定義動作である(glibc は "(null)" を出すが
+			   規格上は保証されない)。else 側は「いずれかが NULL」のときに通るため
+			   必ず該当する。
+			   port / user / pwd を必須にしているのは意図的である。
+			   janus_ice_set_turn_server() は port 未指定を 3478 に、資格情報 NULL を
+			   許容するが、Safie の TURN は 443 で待ち受けており、省略時に 3478 へ
+			   既定するのは誤りになる。資格情報を省いたまま TURN を設定すると認証で
+			   失敗して relay が張れないため、ここでは不足を設定誤りとして扱う。 */
 			if (turn_server && turn_port && turn_user && turn_pwd) {
+				/* この分岐では turn_type だけが NULL になり得る。
+				   turn_pwd は TURN の資格情報なのでログに出さない(存在の有無だけ残す)。 */
 				JANUS_LOG(LOG_INFO, "try to set turn_server=%s, turn_port=%d, turn_type=%s, turn_user=%s, turn_pwd=%s\n", 
-						turn_server, turn_port, turn_type, turn_user, turn_pwd);
+						turn_server, turn_port, turn_type ? turn_type : "(null)",
+						turn_user, "***");
 
-				if(janus_ice_set_turn_server(turn_server, turn_port, turn_type, turn_user, turn_pwd) < 0) {
+				int turn_ret = janus_ice_set_turn_server(turn_server, turn_port, turn_type, turn_user, turn_pwd);
+				if(turn_ret == JANUS_ICE_TURN_RETRY_LATER) {
+					/* 未解決でバックオフ中。異常ではないので致命扱いしない
+					   (理由は janus_ice_set_turn_server 側が LOG_WARN で出している) */
+				} else if(turn_ret < 0) {
 					JANUS_LOG(LOG_FATAL, "Invalid TURN address %s:%u\n", turn_server, turn_port);
 				}
 			} else {
+				/* この分岐は「いずれかが NULL」のときに通るため、全て保護する。
+				   どのフィールドが欠けているかを示すのが目的なので、turn_pwd は
+				   値ではなく有無だけを出す。LOG_FATAL は本番の既定レベルでも
+				   出力されるため、平文の資格情報を残してはならない。 */
 				JANUS_LOG(LOG_FATAL, "failed to set turn_server=%s, turn_port=%d, turn_type=%s, turn_user=%s, turn_pwd=%s\n", 
-						turn_server, turn_port, turn_type, turn_user, turn_pwd);
+						turn_server ? turn_server : "(null)", turn_port,
+						turn_type ? turn_type : "(null)",
+						turn_user ? turn_user : "(null)",
+						turn_pwd ? "***" : "(null)");
 			}
 		}
 
@@ -5062,7 +5085,12 @@ gint main(int argc, char *argv[])
 	item = janus_config_get(config, config_nat, janus_config_type_item, "ice_keepalive_conncheck");
 	if(item && item->value)
 		janus_ice_set_keepalive_conncheck_enabled(janus_is_true(item->value));
-	if(janus_ice_set_turn_server(turn_server, turn_port, turn_type, turn_user, turn_pwd) < 0) {
+	int turn_ret = janus_ice_set_turn_server(turn_server, turn_port, turn_type, turn_user, turn_pwd);
+	if(turn_ret == JANUS_ICE_TURN_RETRY_LATER) {
+		/* 起動時はまだ一度も試行していないためここには来ない。来た場合でも
+		   バックオフは異常ではないので exit(1) してはならない。 */
+		JANUS_LOG(LOG_WARN, "TURN address of %s:%u is not resolved yet\n", turn_server, turn_port);
+	} else if(turn_ret < 0) {
 		if(!ignore_unreachable_ice_server) {
 			JANUS_LOG(LOG_FATAL, "Invalid TURN address %s:%u\n", turn_server, turn_port);
 			exit(1);

@@ -57,13 +57,25 @@ int janus_ice_test_stun_server(janus_network_address *addr, uint16_t port, uint1
  * @param[in] stun_port STUN port to use
  * @returns 0 in case of success, a negative integer on errors */
 int janus_ice_set_stun_server(gchar *stun_server, uint16_t stun_port);
+/*! \brief Return value of janus_ice_set_turn_server() meaning "not resolved yet, backing off"
+ * \details The TURN server name has not been resolved in this process yet, and the
+ * last resolution attempt was more recent than the configured backoff interval, so no
+ * attempt was made this time. Nothing was changed (TURN is still unconfigured). This is
+ * not an error: callers must not treat it as fatal, and may simply retry on the next
+ * call. */
+#define JANUS_ICE_TURN_RETRY_LATER	(-2)
 /*! \brief Method to force Janus to use a TURN server when gathering candidates
  * @param[in] turn_server TURN server address to use
  * @param[in] turn_port TURN port to use
  * @param[in] turn_type Relay type (udp, tcp or tls)
  * @param[in] turn_user TURN username, if needed
  * @param[in] turn_pwd TURN password, if needed
- * @returns 0 in case of success, a negative integer on errors */
+ * @returns 0 in case of success, meaning a TURN address is configured. This includes
+ * the case where a transient DNS failure was ignored and the previously resolved
+ * address is kept.
+ * JANUS_ICE_TURN_RETRY_LATER when the name is not resolved yet and the resolution
+ * was skipped by the backoff; nothing was changed and this is not an error.
+ * Another negative integer on errors. */
 int janus_ice_set_turn_server(gchar *turn_server, uint16_t turn_port, gchar *turn_type, gchar *turn_user, gchar *turn_pwd);
 /*! \brief Method to force Janus to contact a TURN REST API server to get a TURN service to use when gathering candidates.
  * The TURN REST API takes precedence over any static credential passed via janus_ice_set_turn_server
