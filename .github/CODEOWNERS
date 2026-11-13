@@ -1,0 +1,4 @@
+# レビュー必須の担当者。ruleset(.github/rulesets/)の require_code_owner_review がこのファイルを見る。
+# CODEOWNERS は PR の向き先ブランチにあるものが使われるので、このファイルがある `dev/p2p_video_data` 宛ての PR にだけ効く。
+# メンバーが変わったらここを更新する。
+* @yanglongshen @d-koyama-safie
